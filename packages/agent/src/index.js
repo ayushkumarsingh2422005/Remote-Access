@@ -284,13 +284,16 @@ async function captureAndSend() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !controllerConnected || capturing) {
     return;
   }
+  // If the tunnel is backed up, skip this capture so latency does not snowball
+  if (ws.bufferedAmount > 1_500_000) {
+    return;
+  }
   capturing = true;
   try {
     const img = await screenshot({ format: 'jpg' });
     const meta = await sharp(img).metadata();
     const srcW = meta.width || nativeSize.width;
     const srcH = meta.height || nativeSize.height;
-    await refreshNativeSize(srcW, srcH);
 
     const maxW = config.maxWidth || 1280;
     const scale = srcW > maxW ? srcW / maxW : 1;
@@ -303,6 +306,11 @@ async function captureAndSend() {
       .resize(outW, outH, { fit: 'fill' })
       .jpeg({ quality: config.quality || 55, mozjpeg: true })
       .toBuffer();
+
+    // Drop if backlog appeared while we were encoding
+    if (!ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 1_500_000) {
+      return;
+    }
 
     ws.send(
       encodeMessage(MessageType.FRAME, {

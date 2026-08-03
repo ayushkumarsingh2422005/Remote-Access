@@ -16,6 +16,8 @@ let clipboardTimer = null;
 let lastClipboardSent = '';
 let lastClipboardApplied = '';
 let applyingClipboard = false;
+let latestFrame = null;
+let frameFlushScheduled = false;
 const config = loadConfig();
 
 function createWindow() {
@@ -30,6 +32,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -42,6 +45,23 @@ function createWindow() {
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function flushLatestFrame() {
+  frameFlushScheduled = false;
+  if (!latestFrame) return;
+  const frame = latestFrame;
+  latestFrame = null;
+  sendToRenderer('frame', frame);
+}
+
+function queueFrameToRenderer(frame) {
+  // Drop older frames — only the newest matters for live desktop
+  latestFrame = frame;
+  if (!frameFlushScheduled) {
+    frameFlushScheduled = true;
+    setImmediate(flushLatestFrame);
   }
 }
 
@@ -133,6 +153,7 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.HOST) {
+      latestFrame = null;
       sendToRenderer('status', {
         state: 'waiting',
         message: 'Host disconnected — waiting…',
@@ -141,7 +162,7 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.FRAME) {
-      sendToRenderer('frame', {
+      queueFrameToRenderer({
         width: msg.width,
         height: msg.height,
         scale: msg.scale,

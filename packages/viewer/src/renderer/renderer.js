@@ -1,5 +1,5 @@
 const canvas = document.getElementById('screen');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 const placeholder = document.getElementById('placeholder');
 const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
@@ -14,7 +14,32 @@ let fps = 0;
 let pressedKeys = new Set();
 let latestNorm = null;
 let moveTimer = null;
-const MOVE_INTERVAL_MS = 16; // ~60 updates/sec max
+let pairCode = '';
+let relayUrl = '';
+let drawing = false;
+let pendingFrame = null;
+const MOVE_INTERVAL_MS = 16;
+
+function shortRelay(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url.replace(/^ws/i, 'http'));
+    const host = u.host;
+    return host.length > 36 ? `${host.slice(0, 18)}…${host.slice(-12)}` : host;
+  } catch {
+    return url.length > 40 ? `${url.slice(0, 40)}…` : url;
+  }
+}
+
+function updateMeta() {
+  metaEl.textContent = [
+    pairCode ? `pair: ${pairCode}` : null,
+    relayUrl ? shortRelay(relayUrl) : null,
+    `${fps} fps`,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+}
 
 function setStatus(data) {
   const state = data.state || 'unknown';
@@ -30,15 +55,9 @@ function setStatus(data) {
       error: data.message || 'Error',
     }[state] || state);
 
-  if (data.pairCode || data.relayUrl) {
-    metaEl.textContent = [
-      data.pairCode ? `pair: ${data.pairCode}` : null,
-      data.relayUrl || null,
-      fps ? `${fps} fps` : null,
-    ]
-      .filter(Boolean)
-      .join('  ·  ');
-  }
+  if (data.pairCode) pairCode = data.pairCode;
+  if (data.relayUrl) relayUrl = data.relayUrl;
+  updateMeta();
 }
 
 function mapCoords(clientX, clientY) {
@@ -103,6 +122,65 @@ function isMod(e) {
   return e.ctrlKey || e.metaKey;
 }
 
+function base64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function paintFrame(frame) {
+  const bytes = base64ToUint8Array(frame.data);
+  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  const bitmap = await createImageBitmap(blob);
+
+  frameW = frame.width || bitmap.width;
+  frameH = frame.height || bitmap.height;
+  if (canvas.width !== frameW || canvas.height !== frameH) {
+    canvas.width = frameW;
+    canvas.height = frameH;
+  }
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+
+  frameCount += 1;
+  const now = Date.now();
+  if (now - lastFpsAt >= 1000) {
+    fps = frameCount;
+    frameCount = 0;
+    lastFpsAt = now;
+    updateMeta();
+  }
+}
+
+async function drainFrames() {
+  if (drawing) return;
+  drawing = true;
+  try {
+    while (pendingFrame) {
+      const frame = pendingFrame;
+      pendingFrame = null; // drop anything that arrived mid-decode; keep only newest next loop
+      try {
+        await paintFrame(frame);
+      } catch {
+        /* skip bad frame */
+      }
+    }
+  } finally {
+    drawing = false;
+    if (pendingFrame) {
+      drainFrames();
+    }
+  }
+}
+
+function enqueueFrame(frame) {
+  // Always keep only the latest frame — never queue a backlog
+  pendingFrame = frame;
+  drainFrames();
+}
+
 canvas.addEventListener('mousemove', (e) => {
   updateLocalCursor(e.clientX, e.clientY);
   queueMove(mapCoords(e.clientX, e.clientY));
@@ -140,10 +218,8 @@ canvas.addEventListener('wheel', (e) => {
 
 async function handlePasteShortcut(e) {
   e.preventDefault();
-  // Push local clipboard to host, then ask host to paste
   const text = await window.ssRemote.readClipboard();
   window.ssRemote.sendClipboardToHost(text || '');
-  // Small delay so host clipboard is set before Ctrl+V
   setTimeout(() => {
     sendInput({ action: 'paste-text', text: text || '' });
   }, 80);
@@ -152,13 +228,11 @@ async function handlePasteShortcut(e) {
 window.addEventListener('keydown', async (e) => {
   if (document.activeElement !== canvas) return;
 
-  // Bidirectional paste: sync our clipboard → host, then paste there
   if (isMod(e) && (e.key === 'v' || e.key === 'V') && !e.altKey && !e.shiftKey) {
     await handlePasteShortcut(e);
     return;
   }
 
-  // Copy on remote still goes through; host clipboard will sync back to us
   e.preventDefault();
   if (pressedKeys.has(e.code)) return;
   pressedKeys.add(e.code);
@@ -201,33 +275,17 @@ window.ssRemote.onFrame((frame) => {
   if (!frame || !frame.data) {
     viewport.hidden = true;
     placeholder.hidden = false;
+    pendingFrame = null;
     return;
   }
 
   placeholder.hidden = true;
   viewport.hidden = false;
-
-  const img = new Image();
-  img.onload = () => {
-    frameW = frame.width || img.width;
-    frameH = frame.height || img.height;
-    if (canvas.width !== frameW || canvas.height !== frameH) {
-      canvas.width = frameW;
-      canvas.height = frameH;
-    }
-    ctx.drawImage(img, 0, 0);
-    frameCount += 1;
-    const now = Date.now();
-    if (now - lastFpsAt >= 1000) {
-      fps = frameCount;
-      frameCount = 0;
-      lastFpsAt = now;
-      metaEl.textContent = metaEl.textContent.replace(/\s·\s\d+\sfps|$/, `  ·  ${fps} fps`);
-    }
-  };
-  img.src = `data:image/jpeg;base64,${frame.data}`;
+  enqueueFrame(frame);
 });
 
 window.ssRemote.getConfig().then((cfg) => {
-  metaEl.textContent = `pair: ${cfg.pairCode}  ·  ${cfg.relayUrl}`;
+  pairCode = cfg.pairCode || '';
+  relayUrl = cfg.relayUrl || '';
+  updateMeta();
 });
