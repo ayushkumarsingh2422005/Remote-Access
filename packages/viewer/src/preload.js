@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld('ssRemote', {
     ipcRenderer.on('screen-info', handler);
     return () => ipcRenderer.removeListener('screen-info', handler);
   },
+  onClipboard: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('clipboard', handler);
+    return () => ipcRenderer.removeListener('clipboard', handler);
+  },
   sendInput: (event) => ipcRenderer.send('input', event),
+  sendClipboardToHost: (text) => ipcRenderer.send('clipboard-to-host', text),
+  readClipboard: () => ipcRenderer.invoke('read-clipboard'),
+  writeClipboard: (text) => ipcRenderer.invoke('write-clipboard', text),
   getConfig: () => ipcRenderer.invoke('get-config'),
 });

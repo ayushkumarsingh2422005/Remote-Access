@@ -75,11 +75,12 @@ function startRelay(port) {
         return;
       }
 
-      // Forward frames, input, and screen info to the peer
+      // Forward frames, input, clipboard, and screen info to the peer
       if (
         msg.type === MessageType.FRAME ||
         msg.type === MessageType.INPUT ||
-        msg.type === MessageType.SCREEN_INFO
+        msg.type === MessageType.SCREEN_INFO ||
+        msg.type === MessageType.CLIPBOARD
       ) {
         const { pairCode, role } = ws.meta;
         if (!pairCode || !role) return;

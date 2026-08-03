@@ -18,6 +18,7 @@ const MessageType = {
   FRAME: 'frame',
   INPUT: 'input',
   SCREEN_INFO: 'screen_info',
+  CLIPBOARD: 'clipboard',
   ERROR: 'error',
   PING: 'ping',
   PONG: 'pong',

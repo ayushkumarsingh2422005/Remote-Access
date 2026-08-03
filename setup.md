@@ -173,6 +173,8 @@ ss start all
 | Browser password page on loca.lt | Use Cloudflare mode: `$env:SS_TUNNEL="cloudflare"; ss start all` |
 | Black / waiting screen | Confirm both PCs use the same `pairCode` (`ss config`) |
 | Mouse/keyboard not working | Click inside the viewer canvas so it has focus |
+| Cursor feels offset / laggy | Restart host after update (`ss stop all` then `ss start all`). Click the screen once. |
+| Copy/paste not syncing | Click the remote screen, then use Ctrl+C / Ctrl+V as usual. Text clipboard only (not files/images). |
 | Agent log | `~/.ss-remote/agent.log` (Windows: `C:\Users\<you>\.ss-remote\agent.log`) |
 
 ---

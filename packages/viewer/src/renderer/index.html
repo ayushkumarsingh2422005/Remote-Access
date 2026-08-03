@@ -17,7 +17,10 @@
       <p>Waiting for the host to share its screen.</p>
       <p class="hint">On the other computer run <code>ss start all</code></p>
     </div>
-    <canvas id="screen" tabindex="0" hidden></canvas>
+    <div id="viewport" class="viewport" hidden>
+      <canvas id="screen" tabindex="0"></canvas>
+      <div id="cursor" class="remote-cursor" aria-hidden="true"></div>
+    </div>
   </main>
   <script src="renderer.js"></script>
 </body>

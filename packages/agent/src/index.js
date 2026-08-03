@@ -7,6 +7,7 @@ const {
   Button,
   Key,
   Point,
+  screen,
 } = require('@nut-tree-fork/nut-js');
 const {
   loadConfig,
@@ -22,12 +23,30 @@ const fs = require('fs');
 mouse.config.autoDelayMs = 0;
 keyboard.config.autoDelayMs = 0;
 
+let clipboardy;
+function getClipboard() {
+  if (!clipboardy) {
+    clipboardy = require('clipboardy');
+  }
+  return clipboardy;
+}
+
 let ws = null;
 let captureTimer = null;
+let clipboardTimer = null;
 let reconnectTimer = null;
 let screenMeta = { width: 1920, height: 1080, scale: 1 };
+let nativeSize = { width: 1920, height: 1080 };
 let capturing = false;
 let controllerConnected = false;
+let lastClipboardSent = '';
+let lastClipboardApplied = '';
+let applyingClipboard = false;
+
+// Coalesce mouse moves so the cursor does not lag behind a queue of awaits
+let pendingMove = null;
+let moveInFlight = false;
+
 const config = loadConfig();
 if (process.env.SS_RELAY_URL) {
   config.relayUrl = process.env.SS_RELAY_URL;
@@ -44,6 +63,10 @@ function log(...args) {
   if (process.env.SS_FOREGROUND === '1') {
     console.log(...args);
   }
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
 }
 
 const KEY_MAP = {
@@ -82,28 +105,92 @@ const KEY_MAP = {
   F12: Key.F12,
 };
 
-function resolveKey(name) {
-  if (!name) return null;
+function resolveKey(name, code) {
+  if (code && KEY_MAP[code.replace(/^Key/, '').replace(/^Digit/, '')]) {
+    /* fall through */
+  }
+  if (!name && !code) return null;
   if (KEY_MAP[name]) return KEY_MAP[name];
-  if (name.length === 1) {
+  // Prefer e.code style (KeyA, Digit1) for layout-independent mapping
+  if (code) {
+    if (code.startsWith('Key') && code.length === 4) {
+      const letter = code.slice(3);
+      if (Key[letter] !== undefined) return Key[letter];
+    }
+    if (code.startsWith('Digit') && code.length === 6) {
+      const d = code.slice(5);
+      if (Key[`Num${d}`] !== undefined) return Key[`Num${d}`];
+      if (Key[d] !== undefined) return Key[d];
+    }
+  }
+  if (name && name.length === 1) {
     const upper = name.toUpperCase();
     if (Key[upper] !== undefined) return Key[upper];
   }
   return null;
 }
 
+async function refreshNativeSize(fromCaptureW, fromCaptureH) {
+  try {
+    const w = await screen.width();
+    const h = await screen.height();
+    if (w > 0 && h > 0) {
+      nativeSize = { width: w, height: h };
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+  if (fromCaptureW && fromCaptureH) {
+    nativeSize = { width: fromCaptureW, height: fromCaptureH };
+  }
+}
+
+function toNativeCoords(event) {
+  if (typeof event.nx === 'number' && typeof event.ny === 'number') {
+    return {
+      x: Math.round(clamp(event.nx, 0, 1) * (nativeSize.width - 1)),
+      y: Math.round(clamp(event.ny, 0, 1) * (nativeSize.height - 1)),
+    };
+  }
+  const scaleX = nativeSize.width / Math.max(1, screenMeta.width);
+  const scaleY = nativeSize.height / Math.max(1, screenMeta.height);
+  return {
+    x: Math.round(clamp(event.x || 0, 0, screenMeta.width) * scaleX),
+    y: Math.round(clamp(event.y || 0, 0, screenMeta.height) * scaleY),
+  };
+}
+
+async function flushMouseMove() {
+  if (moveInFlight || !pendingMove) return;
+  moveInFlight = true;
+  const next = pendingMove;
+  pendingMove = null;
+  try {
+    await mouse.setPosition(new Point(next.x, next.y));
+  } catch (err) {
+    log('move error:', err.message);
+  } finally {
+    moveInFlight = false;
+    if (pendingMove) {
+      setImmediate(() => {
+        flushMouseMove().catch(() => {});
+      });
+    }
+  }
+}
+
 async function applyInput(event) {
   try {
     if (event.action === 'mousemove') {
-      const x = Math.round(event.x * screenMeta.scale);
-      const y = Math.round(event.y * screenMeta.scale);
-      await mouse.setPosition(new Point(x, y));
+      pendingMove = toNativeCoords(event);
+      flushMouseMove().catch(() => {});
       return;
     }
 
     if (event.action === 'mousedown' || event.action === 'mouseup') {
-      const x = Math.round(event.x * screenMeta.scale);
-      const y = Math.round(event.y * screenMeta.scale);
+      const { x, y } = toNativeCoords(event);
+      pendingMove = null;
       await mouse.setPosition(new Point(x, y));
       const btn =
         event.button === 2
@@ -116,20 +203,6 @@ async function applyInput(event) {
       return;
     }
 
-    if (event.action === 'click') {
-      const x = Math.round(event.x * screenMeta.scale);
-      const y = Math.round(event.y * screenMeta.scale);
-      await mouse.setPosition(new Point(x, y));
-      const btn =
-        event.button === 2
-          ? Button.RIGHT
-          : event.button === 1
-            ? Button.MIDDLE
-            : Button.LEFT;
-      await mouse.click(btn);
-      return;
-    }
-
     if (event.action === 'scroll') {
       const amount = Math.max(1, Math.round(Math.abs(event.dy || event.deltaY || 1) / 40));
       if ((event.dy || event.deltaY || 0) < 0) await mouse.scrollUp(amount);
@@ -137,8 +210,18 @@ async function applyInput(event) {
       return;
     }
 
+    if (event.action === 'paste-text') {
+      await applyClipboardText(event.text || '');
+      // Inject Ctrl+V so the focused app receives paste
+      await keyboard.pressKey(Key.LeftControl);
+      await keyboard.pressKey(Key.V);
+      await keyboard.releaseKey(Key.V);
+      await keyboard.releaseKey(Key.LeftControl);
+      return;
+    }
+
     if (event.action === 'keydown' || event.action === 'keyup') {
-      const key = resolveKey(event.key);
+      const key = resolveKey(event.key, event.code);
       if (!key) {
         if (event.action === 'keydown' && event.key && event.key.length === 1) {
           await keyboard.type(event.key);
@@ -153,6 +236,50 @@ async function applyInput(event) {
   }
 }
 
+async function applyClipboardText(text) {
+  if (typeof text !== 'string') return;
+  applyingClipboard = true;
+  lastClipboardApplied = text;
+  lastClipboardSent = text;
+  try {
+    const clip = getClipboard();
+    await clip.write(text);
+  } catch (err) {
+    log('clipboard write error:', err.message);
+  } finally {
+    setTimeout(() => {
+      applyingClipboard = false;
+    }, 400);
+  }
+}
+
+function sendClipboardToController(text) {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !controllerConnected) return;
+  if (text === lastClipboardSent) return;
+  lastClipboardSent = text;
+  ws.send(
+    encodeMessage(MessageType.CLIPBOARD, {
+      text,
+      from: Role.HOST,
+    })
+  );
+}
+
+async function pollClipboard() {
+  if (!controllerConnected || applyingClipboard) return;
+  try {
+    const clip = getClipboard();
+    const text = await clip.read();
+    if (typeof text === 'string' && text.length > 0 && text !== lastClipboardSent) {
+      // Cap size to keep tunnel happy
+      const payload = text.length > 200000 ? text.slice(0, 200000) : text;
+      sendClipboardToController(payload);
+    }
+  } catch {
+    /* ignore empty / locked clipboard */
+  }
+}
+
 async function captureAndSend() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !controllerConnected || capturing) {
     return;
@@ -161,8 +288,10 @@ async function captureAndSend() {
   try {
     const img = await screenshot({ format: 'jpg' });
     const meta = await sharp(img).metadata();
-    const srcW = meta.width || 1920;
-    const srcH = meta.height || 1080;
+    const srcW = meta.width || nativeSize.width;
+    const srcH = meta.height || nativeSize.height;
+    await refreshNativeSize(srcW, srcH);
+
     const maxW = config.maxWidth || 1280;
     const scale = srcW > maxW ? srcW / maxW : 1;
     const outW = Math.round(srcW / scale);
@@ -171,7 +300,7 @@ async function captureAndSend() {
     screenMeta = { width: outW, height: outH, scale };
 
     const jpeg = await sharp(img)
-      .resize(outW, outH, { fit: 'inside' })
+      .resize(outW, outH, { fit: 'fill' })
       .jpeg({ quality: config.quality || 55, mozjpeg: true })
       .toBuffer();
 
@@ -180,6 +309,8 @@ async function captureAndSend() {
         width: outW,
         height: outH,
         scale,
+        nativeWidth: nativeSize.width,
+        nativeHeight: nativeSize.height,
         data: jpeg.toString('base64'),
       })
     );
@@ -196,12 +327,19 @@ function startCaptureLoop() {
   captureTimer = setInterval(() => {
     captureAndSend().catch(() => {});
   }, interval);
+  clipboardTimer = setInterval(() => {
+    pollClipboard().catch(() => {});
+  }, 500);
 }
 
 function stopCaptureLoop() {
   if (captureTimer) {
     clearInterval(captureTimer);
     captureTimer = null;
+  }
+  if (clipboardTimer) {
+    clearInterval(clipboardTimer);
+    clipboardTimer = null;
   }
 }
 
@@ -227,11 +365,14 @@ function connect() {
 
     if (msg.type === MessageType.REGISTERED) {
       log('registered as host, pairCode=', config.pairCode);
+      await refreshNativeSize();
       ws.send(
         encodeMessage(MessageType.SCREEN_INFO, {
           width: screenMeta.width,
           height: screenMeta.height,
           scale: screenMeta.scale,
+          nativeWidth: nativeSize.width,
+          nativeHeight: nativeSize.height,
         })
       );
     }
@@ -250,6 +391,10 @@ function connect() {
 
     if (msg.type === MessageType.INPUT && msg.event) {
       await applyInput(msg.event);
+    }
+
+    if (msg.type === MessageType.CLIPBOARD && msg.from === Role.CONTROLLER) {
+      await applyClipboardText(msg.text || '');
     }
   });
 
@@ -289,10 +434,16 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-log('agent starting');
-connect();
+refreshNativeSize()
+  .then(() => {
+    log('agent starting', `screen=${nativeSize.width}x${nativeSize.height}`);
+    connect();
+  })
+  .catch(() => {
+    log('agent starting');
+    connect();
+  });
 
-// Keep process alive
 setInterval(() => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(encodeMessage(MessageType.PING));

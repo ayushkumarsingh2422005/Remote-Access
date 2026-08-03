@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, clipboard } = require('electron');
 const path = require('path');
 const WebSocket = require('ws');
 const {
@@ -12,6 +12,10 @@ const {
 let mainWindow = null;
 let ws = null;
 let reconnectTimer = null;
+let clipboardTimer = null;
+let lastClipboardSent = '';
+let lastClipboardApplied = '';
+let applyingClipboard = false;
 const config = loadConfig();
 
 function createWindow() {
@@ -41,6 +45,51 @@ function sendToRenderer(channel, payload) {
   }
 }
 
+function applyRemoteClipboard(text) {
+  if (typeof text !== 'string') return;
+  applyingClipboard = true;
+  lastClipboardApplied = text;
+  lastClipboardSent = text;
+  try {
+    clipboard.writeText(text);
+  } catch {
+    /* ignore */
+  }
+  setTimeout(() => {
+    applyingClipboard = false;
+  }, 400);
+}
+
+function pollLocalClipboard() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || applyingClipboard) return;
+  try {
+    const text = clipboard.readText();
+    if (!text || text === lastClipboardSent) return;
+    const payload = text.length > 200000 ? text.slice(0, 200000) : text;
+    lastClipboardSent = payload;
+    ws.send(
+      encodeMessage(MessageType.CLIPBOARD, {
+        text: payload,
+        from: Role.CONTROLLER,
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function startClipboardSync() {
+  stopClipboardSync();
+  clipboardTimer = setInterval(pollLocalClipboard, 500);
+}
+
+function stopClipboardSync() {
+  if (clipboardTimer) {
+    clearInterval(clipboardTimer);
+    clipboardTimer = null;
+  }
+}
+
 function connectRelay() {
   if (ws) {
     try {
@@ -67,6 +116,7 @@ function connectRelay() {
       relayUrl: config.relayUrl,
       pairCode: config.pairCode,
     });
+    startClipboardSync();
   });
 
   ws.on('message', (raw) => {
@@ -95,6 +145,8 @@ function connectRelay() {
         width: msg.width,
         height: msg.height,
         scale: msg.scale,
+        nativeWidth: msg.nativeWidth,
+        nativeHeight: msg.nativeHeight,
         data: msg.data,
       });
     }
@@ -103,12 +155,18 @@ function connectRelay() {
       sendToRenderer('screen-info', msg);
     }
 
+    if (msg.type === MessageType.CLIPBOARD && msg.from === Role.HOST) {
+      applyRemoteClipboard(msg.text || '');
+      sendToRenderer('clipboard', { text: msg.text || '', from: 'host' });
+    }
+
     if (msg.type === MessageType.ERROR) {
       sendToRenderer('status', { state: 'error', message: msg.error });
     }
   });
 
   ws.on('close', () => {
+    stopClipboardSync();
     sendToRenderer('status', { state: 'disconnected', message: 'Relay disconnected' });
     if (!reconnectTimer) {
       reconnectTimer = setTimeout(() => {
@@ -131,7 +189,31 @@ ipcMain.on('input', (_event, inputEvent) => {
   ws.send(encodeMessage(MessageType.INPUT, { event: inputEvent }));
 });
 
+ipcMain.on('clipboard-to-host', (_event, text) => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (typeof text !== 'string') return;
+  const payload = text.length > 200000 ? text.slice(0, 200000) : text;
+  lastClipboardSent = payload;
+  ws.send(
+    encodeMessage(MessageType.CLIPBOARD, {
+      text: payload,
+      from: Role.CONTROLLER,
+    })
+  );
+});
+
 ipcMain.handle('get-config', () => loadConfig());
+ipcMain.handle('read-clipboard', () => {
+  try {
+    return clipboard.readText();
+  } catch {
+    return '';
+  }
+});
+ipcMain.handle('write-clipboard', (_e, text) => {
+  applyRemoteClipboard(typeof text === 'string' ? text : '');
+  return true;
+});
 
 app.whenReady().then(() => {
   createWindow();
@@ -139,6 +221,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  stopClipboardSync();
   if (ws) {
     try {
       ws.close();
