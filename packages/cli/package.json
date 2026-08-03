@@ -1,0 +1,14 @@
+{
+  "name": "ss",
+  "version": "1.0.0",
+  "description": "Screen Share remote desktop CLI",
+  "bin": {
+    "ss": "./bin/ss.js"
+  },
+  "main": "bin/ss.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@ss-remote/shared": "*",
+    "localtunnel": "^2.0.2"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@ss-remote/agent",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "@ss-remote/shared": "*",
+    "screenshot-desktop": "^1.15.4",
+    "sharp": "^0.33.5",
+    "ws": "^8.18.0"
+  }
+}

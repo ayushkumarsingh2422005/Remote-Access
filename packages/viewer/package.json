@@ -1,0 +1,16 @@
+{
+  "name": "@ss-remote/viewer",
+  "version": "1.0.0",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@ss-remote/shared": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

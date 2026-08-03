@@ -1,0 +1,10 @@
+{
+  "name": "@ss-remote/relay",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@ss-remote/shared": "*",
+    "ws": "^8.18.0"
+  }
+}

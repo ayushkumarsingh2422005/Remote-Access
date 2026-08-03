@@ -1,0 +1,19 @@
+{
+  "name": "ss-remote",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple peer-to-peer remote desktop for personal use",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/link-cli.js",
+    "ss": "node packages/cli/bin/ss.js",
+    "relay": "node packages/relay/src/index.js",
+    "agent": "node packages/agent/src/index.js",
+    "viewer": "npm run start --workspace=packages/viewer"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

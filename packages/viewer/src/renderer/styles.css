@@ -1,0 +1,110 @@
+:root {
+  --bg: #0f1218;
+  --bar: #161b24;
+  --text: #e8edf5;
+  --muted: #8b97a8;
+  --accent: #3d9cf0;
+  --ok: #3ecf8e;
+  --warn: #e6b84d;
+  --err: #f07178;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "IBM Plex Sans", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 40px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #1a2130, var(--bar));
+  border-bottom: 1px solid #243042;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.status.ready {
+  color: var(--ok);
+}
+
+.status.error,
+.status.disconnected {
+  color: var(--err);
+}
+
+.status.waiting,
+.status.connecting {
+  color: var(--warn);
+}
+
+.meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage {
+  height: calc(100% - 40px);
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 30% 20%, #1a2436 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, #141c28 0%, transparent 45%),
+    var(--bg);
+}
+
+.placeholder {
+  text-align: center;
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 420px;
+  padding: 24px;
+}
+
+.placeholder .hint {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+code {
+  background: #1e2838;
+  color: #c5d4ef;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+}
+
+#screen {
+  max-width: 100%;
+  max-height: 100%;
+  outline: none;
+  cursor: none;
+  box-shadow: 0 0 0 1px #243042;
+  background: #000;
+}

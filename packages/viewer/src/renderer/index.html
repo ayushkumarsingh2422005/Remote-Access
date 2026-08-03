@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SS Remote</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">SS Remote</div>
+    <div id="status" class="status">Connecting…</div>
+    <div id="meta" class="meta"></div>
+  </header>
+  <main class="stage">
+    <div id="placeholder" class="placeholder">
+      <p>Waiting for the host to share its screen.</p>
+      <p class="hint">On the other computer run <code>ss start all</code></p>
+    </div>
+    <canvas id="screen" tabindex="0" hidden></canvas>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>
