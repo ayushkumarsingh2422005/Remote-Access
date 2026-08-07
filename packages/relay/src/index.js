@@ -80,7 +80,8 @@ function startRelay(port) {
         msg.type === MessageType.FRAME ||
         msg.type === MessageType.INPUT ||
         msg.type === MessageType.SCREEN_INFO ||
-        msg.type === MessageType.CLIPBOARD
+        msg.type === MessageType.CLIPBOARD ||
+        msg.type === MessageType.INPUT_STATE
       ) {
         const { pairCode, role } = ws.meta;
         if (!pairCode || !role) return;

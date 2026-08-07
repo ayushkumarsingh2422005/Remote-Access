@@ -19,6 +19,7 @@ const {
   ensureAppDir,
 } = require('@ss-remote/shared');
 const fs = require('fs');
+const { startHostHotkeys } = require('./hotkeys');
 
 mouse.config.autoDelayMs = 0;
 keyboard.config.autoDelayMs = 0;
@@ -35,10 +36,12 @@ let ws = null;
 let captureTimer = null;
 let clipboardTimer = null;
 let reconnectTimer = null;
+let stopHotkeys = null;
 let screenMeta = { width: 1920, height: 1080, scale: 1 };
 let nativeSize = { width: 1920, height: 1080 };
 let capturing = false;
 let controllerConnected = false;
+let inputEnabled = true; // remote mouse/keyboard allowed
 let lastClipboardSent = '';
 let lastClipboardApplied = '';
 let applyingClipboard = false;
@@ -180,7 +183,54 @@ async function flushMouseMove() {
   }
 }
 
+function broadcastInputState() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(
+    encodeMessage(MessageType.INPUT_STATE, {
+      enabled: inputEnabled,
+      message: inputEnabled
+        ? 'Keyboard and Mouse enabled'
+        : 'Keyboard and Mouse disabled',
+    })
+  );
+  log(inputEnabled ? 'remote input ENABLED' : 'remote input DISABLED');
+}
+
+function setInputEnabled(enabled) {
+  if (inputEnabled === enabled) {
+    broadcastInputState();
+    return;
+  }
+  inputEnabled = enabled;
+  pendingMove = null;
+  broadcastInputState();
+}
+
+function setupHotkeys() {
+  if (stopHotkeys) {
+    try {
+      stopHotkeys();
+    } catch {
+      /* ignore */
+    }
+    stopHotkeys = null;
+  }
+
+  const lockSpec = config.lockInputShortcut || 'Ctrl+Alt+L';
+  const unlockSpec = config.unlockInputShortcut || 'Ctrl+Alt+U';
+  log(`host hotkeys: lock=${lockSpec} unlock=${unlockSpec}`);
+
+  stopHotkeys = startHostHotkeys({
+    lockSpec,
+    unlockSpec,
+    onLock: () => setInputEnabled(false),
+    onUnlock: () => setInputEnabled(true),
+    log,
+  });
+}
+
 async function applyInput(event) {
+  if (!inputEnabled) return;
   try {
     if (event.action === 'mousemove') {
       pendingMove = toNativeCoords(event);
@@ -389,6 +439,7 @@ function connect() {
       log('controller connected — sharing screen');
       controllerConnected = true;
       startCaptureLoop();
+      broadcastInputState();
     }
 
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.CONTROLLER) {
@@ -398,10 +449,12 @@ function connect() {
     }
 
     if (msg.type === MessageType.INPUT && msg.event) {
+      if (!inputEnabled) return;
       await applyInput(msg.event);
     }
 
     if (msg.type === MessageType.CLIPBOARD && msg.from === Role.CONTROLLER) {
+      if (!inputEnabled) return;
       await applyClipboardText(msg.text || '');
     }
   });
@@ -428,6 +481,14 @@ function scheduleReconnect() {
 
 function shutdown() {
   stopCaptureLoop();
+  if (stopHotkeys) {
+    try {
+      stopHotkeys();
+    } catch {
+      /* ignore */
+    }
+    stopHotkeys = null;
+  }
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (ws) {
     try {
@@ -445,10 +506,12 @@ process.on('SIGTERM', shutdown);
 refreshNativeSize()
   .then(() => {
     log('agent starting', `screen=${nativeSize.width}x${nativeSize.height}`);
+    setupHotkeys();
     connect();
   })
   .catch(() => {
     log('agent starting');
+    setupHotkeys();
     connect();
   });
 

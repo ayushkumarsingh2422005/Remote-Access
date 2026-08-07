@@ -3,6 +3,7 @@ const ctx = canvas.getContext('2d', { alpha: false });
 const placeholder = document.getElementById('placeholder');
 const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
+const inputLockEl = document.getElementById('input-lock');
 const statusEl = document.getElementById('status');
 const metaEl = document.getElementById('meta');
 
@@ -18,6 +19,7 @@ let pairCode = '';
 let relayUrl = '';
 let drawing = false;
 let pendingFrame = null;
+let inputEnabled = true;
 const MOVE_INTERVAL_MS = 16;
 
 function shortRelay(url) {
@@ -77,7 +79,30 @@ function mapCoords(clientX, clientY) {
   };
 }
 
+function setInputEnabled(enabled, message) {
+  inputEnabled = enabled !== false;
+  viewport.classList.toggle('input-disabled', !inputEnabled);
+  inputLockEl.hidden = inputEnabled;
+  inputLockEl.textContent = message || 'Keyboard and Mouse disabled';
+
+  if (!inputEnabled) {
+    // Release any held keys locally so we don't leave sticky state
+    for (const code of pressedKeys) {
+      /* do not send while locked */
+    }
+    pressedKeys.clear();
+    latestNorm = null;
+    cursorEl.style.opacity = '0';
+    statusEl.className = 'status waiting';
+    statusEl.textContent = 'Keyboard and Mouse disabled';
+  } else {
+    statusEl.className = 'status ready';
+    statusEl.textContent = 'Live — you have full control';
+  }
+}
+
 function sendInput(event) {
+  if (!inputEnabled) return;
   window.ssRemote.sendInput(event);
 }
 
@@ -182,6 +207,10 @@ function enqueueFrame(frame) {
 }
 
 canvas.addEventListener('mousemove', (e) => {
+  if (!inputEnabled) {
+    cursorEl.style.opacity = '0';
+    return;
+  }
   updateLocalCursor(e.clientX, e.clientY);
   queueMove(mapCoords(e.clientX, e.clientY));
 });
@@ -217,6 +246,10 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 async function handlePasteShortcut(e) {
+  if (!inputEnabled) {
+    e.preventDefault();
+    return;
+  }
   e.preventDefault();
   const text = await window.ssRemote.readClipboard();
   window.ssRemote.sendClipboardToHost(text || '');
@@ -270,6 +303,10 @@ window.addEventListener('blur', () => {
 });
 
 window.ssRemote.onStatus(setStatus);
+
+window.ssRemote.onInputState((data) => {
+  setInputEnabled(data.enabled !== false, data.message);
+});
 
 window.ssRemote.onFrame((frame) => {
   if (!frame || !frame.data) {

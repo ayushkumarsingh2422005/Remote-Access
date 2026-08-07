@@ -164,6 +164,10 @@ Typical (India ↔ US, no VPS):
   Host:       ss start all     → copy the public link
   Friend:     ss connect <url> → opens viewer and takes control
 
+Host shortcuts (while agent is running):
+  Ctrl+Alt+L   Disable remote mouse & keyboard (screen keeps sharing)
+  Ctrl+Alt+U   Resume remote mouse & keyboard
+
 Config file: ${CONFIG_PATH}
 `.trim());
 }

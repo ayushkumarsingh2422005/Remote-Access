@@ -19,6 +19,7 @@ const MessageType = {
   INPUT: 'input',
   SCREEN_INFO: 'screen_info',
   CLIPBOARD: 'clipboard',
+  INPUT_STATE: 'input_state',
   ERROR: 'error',
   PING: 'ping',
   PONG: 'pong',
@@ -36,6 +37,9 @@ const DEFAULT_CONFIG = {
   fps: 10,
   maxWidth: 1280,
   relayPort: 9000,
+  // Host-side global shortcuts (sender PC)
+  lockInputShortcut: 'Ctrl+Alt+L',
+  unlockInputShortcut: 'Ctrl+Alt+U',
 };
 
 function ensureAppDir() {

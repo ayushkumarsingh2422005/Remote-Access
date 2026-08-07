@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('ssRemote', {
     ipcRenderer.on('clipboard', handler);
     return () => ipcRenderer.removeListener('clipboard', handler);
   },
+  onInputState: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('input-state', handler);
+    return () => ipcRenderer.removeListener('input-state', handler);
+  },
   sendInput: (event) => ipcRenderer.send('input', event),
   sendClipboardToHost: (text) => ipcRenderer.send('clipboard-to-host', text),
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),

@@ -181,6 +181,17 @@ function connectRelay() {
       sendToRenderer('clipboard', { text: msg.text || '', from: 'host' });
     }
 
+    if (msg.type === MessageType.INPUT_STATE) {
+      sendToRenderer('input-state', {
+        enabled: msg.enabled !== false,
+        message: msg.message || (
+          msg.enabled !== false
+            ? 'Keyboard and Mouse enabled'
+            : 'Keyboard and Mouse disabled'
+        ),
+      });
+    }
+
     if (msg.type === MessageType.ERROR) {
       sendToRenderer('status', { state: 'error', message: msg.error });
     }

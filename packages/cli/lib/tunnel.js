@@ -251,15 +251,7 @@ async function startInternetTunnel(localPort) {
     return startCloudflareTunnel(localPort);
   }
 
-  // Prefer existing cloudflared binary if present
-  if (fs.existsSync(cloudflaredPath())) {
-    try {
-      return await startCloudflareTunnel(localPort);
-    } catch (err) {
-      console.log(`Cloudflare tunnel failed (${err.message}). Using localtunnel…`);
-    }
-  }
-
+  // Explicit localtunnel (or any non-cloudflare value)
   return startLocalTunnel(localPort);
 }
 

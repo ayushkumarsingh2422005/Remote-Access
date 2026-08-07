@@ -73,6 +73,26 @@ ss share           # print the public link again
 ss stop all        # stop sharing
 ```
 
+### Host shortcuts (privacy / pause control)
+
+While the agent is running, use these on the **host keyboard** (works even if another app is focused):
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Alt+L` | Disable remote mouse & keyboard (screen share continues) |
+| `Ctrl+Alt+U` | Resume remote mouse & keyboard |
+
+The controller sees a label: **Keyboard and Mouse disabled**.
+
+Change shortcuts if you want:
+
+```bash
+ss config set lockInputShortcut Ctrl+Alt+L
+ss config set unlockInputShortcut Ctrl+Alt+U
+```
+
+Then restart the host agent (`ss stop all` → `ss start all`).
+
 ### Optional: more reliable Cloudflare tunnel
 
 If localtunnel feels flaky, use Cloudflare’s free quick tunnel instead (downloads a small helper once, still no account/VPS):
@@ -91,6 +111,39 @@ SS_TUNNEL=cloudflare ss start all
 ```
 
 The share link will look like `wss://….trycloudflare.com`.
+
+### Switch back to localtunnel (leave Cloudflare)
+
+`$env:SS_TUNNEL` only affects the **current** terminal. To stop using Cloudflare:
+
+**Windows (PowerShell) — same window where you set it:**
+
+```powershell
+Remove-Item Env:SS_TUNNEL
+```
+
+Or force localtunnel:
+
+```powershell
+$env:SS_TUNNEL="localtunnel"
+```
+
+Then restart:
+
+```powershell
+ss stop all
+ss start all
+```
+
+**macOS / Linux:** just open a new terminal (or unset the variable) and run `ss start all` normally — do **not** prefix with `SS_TUNNEL=cloudflare`.
+
+```bash
+unset SS_TUNNEL
+ss stop all
+ss start all
+```
+
+A new terminal window never has `$env:SS_TUNNEL` set, so `ss start all` uses localtunnel by default.
 
 ---
 
