@@ -44,6 +44,7 @@ let controllerConnected = false;
 let manualLock = false; // Ctrl+Alt+L
 let hostBusy = false; // host is using local mouse/keyboard
 let hostIdleTimer = null;
+let suppressHostUntil = 0; // ignore "host activity" caused by our own remote injection
 let lastBroadcastEnabled = true;
 let lastBroadcastReason = 'enabled';
 let lastClipboardSent = '';
@@ -170,7 +171,9 @@ async function flushMouseMove() {
   const next = pendingMove;
   pendingMove = null;
   try {
+    noteRemoteInject();
     await mouse.setPosition(new Point(next.x, next.y));
+    noteRemoteInject();
   } catch (err) {
     log('move error:', err.message);
   } finally {
@@ -235,22 +238,39 @@ function setManualLock(locked) {
   syncInputGate();
 }
 
+/** Remote injection is often not marked INJECTED by Windows — ignore echo as "host". */
+function noteRemoteInject() {
+  const pad = Math.max(400, Number(config.hostInjectGraceMs) || 700);
+  suppressHostUntil = Date.now() + pad;
+}
+
 function onHostPhysicalActivity() {
-  // Host always wins while they are actively using the machine
+  // Ignore activity that is just our own remote mouse/keyboard echoing back
+  if (Date.now() < suppressHostUntil) return;
+
   const wasBusy = hostBusy;
   hostBusy = true;
   if (hostIdleTimer) clearTimeout(hostIdleTimer);
   const idleMs = Math.max(500, Number(config.hostPriorityMs) || 2000);
   hostIdleTimer = setTimeout(() => {
     hostIdleTimer = null;
+    // Don't re-enable during an active remote inject window
+    if (Date.now() < suppressHostUntil) {
+      hostIdleTimer = setTimeout(() => {
+        hostIdleTimer = null;
+        if (Date.now() >= suppressHostUntil) {
+          hostBusy = false;
+          syncInputGate();
+        }
+      }, suppressHostUntil - Date.now() + 50);
+      return;
+    }
     hostBusy = false;
     syncInputGate();
   }, idleMs);
 
   if (!wasBusy) {
     syncInputGate();
-  } else {
-    // Still busy — only refresh timer; no spam broadcast
   }
 }
 
@@ -284,6 +304,7 @@ function setupHotkeys() {
 
 async function applyInput(event) {
   if (!isInputEnabled()) return;
+  noteRemoteInject();
   try {
     if (event.action === 'mousemove') {
       pendingMove = toNativeCoords(event);
@@ -294,6 +315,7 @@ async function applyInput(event) {
     if (event.action === 'mousedown' || event.action === 'mouseup') {
       const { x, y } = toNativeCoords(event);
       pendingMove = null;
+      noteRemoteInject();
       await mouse.setPosition(new Point(x, y));
       const btn =
         event.button === 2
@@ -301,38 +323,46 @@ async function applyInput(event) {
           : event.button === 1
             ? Button.MIDDLE
             : Button.LEFT;
+      noteRemoteInject();
       if (event.action === 'mousedown') await mouse.pressButton(btn);
       else await mouse.releaseButton(btn);
+      noteRemoteInject();
       return;
     }
 
     if (event.action === 'scroll') {
+      noteRemoteInject();
       const amount = Math.max(1, Math.round(Math.abs(event.dy || event.deltaY || 1) / 40));
       if ((event.dy || event.deltaY || 0) < 0) await mouse.scrollUp(amount);
       else await mouse.scrollDown(amount);
+      noteRemoteInject();
       return;
     }
 
     if (event.action === 'paste-text') {
+      noteRemoteInject();
       await applyClipboardText(event.text || '');
-      // Inject Ctrl+V so the focused app receives paste
       await keyboard.pressKey(Key.LeftControl);
       await keyboard.pressKey(Key.V);
       await keyboard.releaseKey(Key.V);
       await keyboard.releaseKey(Key.LeftControl);
+      noteRemoteInject();
       return;
     }
 
     if (event.action === 'keydown' || event.action === 'keyup') {
       const key = resolveKey(event.key, event.code);
+      noteRemoteInject();
       if (!key) {
         if (event.action === 'keydown' && event.key && event.key.length === 1) {
           await keyboard.type(event.key);
         }
+        noteRemoteInject();
         return;
       }
       if (event.action === 'keydown') await keyboard.pressKey(key);
       else await keyboard.releaseKey(key);
+      noteRemoteInject();
     }
   } catch (err) {
     log('input error:', err.message);

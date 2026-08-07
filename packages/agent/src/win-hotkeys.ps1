@@ -126,20 +126,13 @@ public static class SsHostWatch {
   public static IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam) {
     if (nCode >= 0) {
       int msg = wParam.ToInt32();
-      // Clicks / wheel always count; moves only sometimes (throttled in EmitActivity)
+      // Do NOT treat mouse-move as host activity — remote cursor injection
+      // often looks like a real move and caused a disable/enable feedback loop.
+      // Host takes over with click, wheel, or any key press.
       if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
-          msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL || msg == WM_MOUSEMOVE) {
+          msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
         MSLLHOOKSTRUCT hs = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
         if ((hs.flags & LLMHF_INJECTED) == 0) {
-          // Ignore tiny mouse jitter from move floods a bit more for MOVE only
-          if (msg == WM_MOUSEMOVE) {
-            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            lock (gate) {
-              if (now - lastActivityMs < 180) {
-                return CallNextHookEx(mouseHook, nCode, wParam, lParam);
-              }
-            }
-          }
           EmitActivity();
         }
       }

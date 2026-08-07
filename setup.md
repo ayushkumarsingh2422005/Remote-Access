@@ -91,16 +91,18 @@ The controller sees a label: **Keyboard and Mouse disabled**.
 
 ### Host priority (auto)
 
-If the **host** uses their own mouse or keyboard while someone is connected, remote control is paused automatically so both sides don’t fight. The controller sees:
+If the **host** clicks, scrolls, or types on their own PC while someone is connected, remote control is paused so both sides don’t fight. The controller sees:
 
 **Host is using this PC**
 
 When the host stops for about 2 seconds, control returns to the controller (unless you locked with `Ctrl+Alt+L`).
 
+Mouse *movement* alone does not steal control (that was causing a false feedback loop with remote cursor injection).
+
 ```bash
 ss config set hostPriorityMs 2000
+ss config set hostInjectGraceMs 700
 ```
-
 Change shortcuts if you want:
 
 ```bash
