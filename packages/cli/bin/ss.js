@@ -137,6 +137,7 @@ function status() {
   console.log(`  relayUrl: ${config.relayUrl}`);
   if (conn && conn.publicWsUrl) {
     console.log(`  public:   ${conn.publicWsUrl}`);
+    if (conn.provider) console.log(`  mode:     ${conn.provider}`);
   }
   console.log(`  log:      ${LOG_PATH}`);
 }
@@ -257,6 +258,11 @@ Typical (India ↔ US, no VPS):
   Host:       ss start all     → copy the public link
   Friend:     ss connect <url> → opens viewer and takes control
 
+Connection modes (SS_TUNNEL env):
+  localtunnel   default free tunnel
+  cloudflare    $env:SS_TUNNEL="cloudflare"
+  tailscale     $env:SS_TUNNEL="tailscale"  (both PCs need Tailscale)
+
 Host shortcuts (while agent is running):
   Ctrl+Alt+L   Disable remote mouse & keyboard (screen keeps sharing)
   Ctrl+Alt+U   Resume remote mouse & keyboard
@@ -265,17 +271,29 @@ Config file: ${CONFIG_PATH}
 `.trim());
 }
 
-function printShareBanner(publicWsUrl, pairCode) {
+function printShareBanner(publicWsUrl, pairCode, extra = {}) {
+  const provider = extra.provider || 'localtunnel';
   console.log('');
   console.log('══════════════════════════════════════════════════');
-  console.log('  Screen sharing is LIVE over the internet');
+  if (provider === 'tailscale') {
+    console.log('  Screen sharing is LIVE over Tailscale');
+  } else {
+    console.log('  Screen sharing is LIVE over the internet');
+  }
   console.log('══════════════════════════════════════════════════');
+  console.log('');
+  console.log(`  Mode: ${provider}`);
   console.log('');
   console.log('  Send this command to your friend:');
   console.log('');
   console.log(`    ss connect ${publicWsUrl}`);
   console.log('');
   console.log(`  Pair code (must match): ${pairCode}`);
+  if (provider === 'tailscale') {
+    console.log('');
+    console.log('  Both PCs need Tailscale installed and logged into the same account/tailnet.');
+    console.log('  Friend: install Tailscale → connected → then run ss connect above.');
+  }
   console.log('');
   console.log('  Or they can run:');
   console.log(`    ss config set relayUrl ${publicWsUrl}`);
@@ -289,21 +307,28 @@ async function startAll() {
   const config = loadConfig();
   const port = config.relayPort || 9000;
   const localRelay = `ws://127.0.0.1:${port}`;
+  const mode = (process.env.SS_TUNNEL || 'localtunnel').toLowerCase();
 
   startDetached(RELAY_ENTRY, RELAY_PID_PATH, 'relay', {
     SS_RELAY_PORT: String(port),
   });
 
-  // Give the relay a moment to bind
   await sleep(800);
 
-  console.log('Opening free internet tunnel…');
+  const modeLabel =
+    mode === 'tailscale' || mode === 'ts'
+      ? 'Tailscale'
+      : mode === 'cloudflare' || mode === 'cf'
+        ? 'Cloudflare'
+        : 'localtunnel';
+  console.log(`Opening connection (${modeLabel})…`);
+
   let tunnelInfo;
   try {
     tunnelInfo = await startInternetTunnel(port);
-    console.log(`tunnel ready → ${tunnelInfo.publicWsUrl}`);
+    console.log(`ready → ${tunnelInfo.publicWsUrl}`);
   } catch (err) {
-    console.error('Could not open internet tunnel:', err.message);
+    console.error('Could not open connection:', err.message);
     console.error('You can still use local network with relayUrl ws://127.0.0.1:' + port);
     startDetached(AGENT_ENTRY, PID_PATH, 'agent', {
       SS_RELAY_URL: localRelay,
@@ -311,12 +336,13 @@ async function startAll() {
     return;
   }
 
-  // Host agent always talks to local relay; friend uses the public tunnel URL
   startDetached(AGENT_ENTRY, PID_PATH, 'agent', {
     SS_RELAY_URL: localRelay,
   });
 
-  printShareBanner(tunnelInfo.publicWsUrl, config.pairCode);
+  printShareBanner(tunnelInfo.publicWsUrl, config.pairCode, {
+    provider: tunnelInfo.provider || modeLabel.toLowerCase(),
+  });
 }
 
 function stopAll() {
@@ -329,12 +355,28 @@ function stopAll() {
 function share() {
   const config = loadConfig();
   const conn = readConnection();
-  const tunnelPid = readPid(TUNNEL_PID_PATH);
-  if (!conn || !conn.publicWsUrl || !(tunnelPid && isRunning(tunnelPid))) {
-    console.log('No active public tunnel. On the host computer run: ss start all');
+  if (!conn || !conn.publicWsUrl) {
+    console.log('No active share link. On the host computer run: ss start all');
     return;
   }
-  printShareBanner(conn.publicWsUrl, config.pairCode);
+
+  const tunnelPid = readPid(TUNNEL_PID_PATH);
+  const needsTunnelProcess =
+    conn.provider === 'localtunnel' || conn.provider === 'cloudflare';
+  if (needsTunnelProcess && !(tunnelPid && isRunning(tunnelPid))) {
+    console.log('Tunnel process is not running. On the host run: ss start all');
+    return;
+  }
+
+  const relayPid = readPid(RELAY_PID_PATH);
+  if (!(relayPid && isRunning(relayPid))) {
+    console.log('Relay is not running. On the host run: ss start all');
+    return;
+  }
+
+  printShareBanner(conn.publicWsUrl, config.pairCode, {
+    provider: conn.provider || 'localtunnel',
+  });
 }
 
 function openViewer() {

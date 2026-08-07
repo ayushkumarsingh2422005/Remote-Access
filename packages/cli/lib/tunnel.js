@@ -240,18 +240,90 @@ async function startCloudflareTunnel(localPort) {
   return info;
 }
 
+async function startTailscaleEndpoint(localPort) {
+  const { execFileSync } = require('child_process');
+
+  function findTailscaleBin() {
+    if (process.platform === 'win32') {
+      const candidates = [
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Tailscale', 'tailscale.exe'),
+        path.join(process.env.LOCALAPPDATA || '', 'Tailscale', 'tailscale.exe'),
+      ];
+      for (const c of candidates) {
+        if (c && fs.existsSync(c)) return c;
+      }
+    }
+    return 'tailscale';
+  }
+
+  const bin = findTailscaleBin();
+  try {
+    execFileSync(bin, ['version'], { stdio: 'ignore', windowsHide: true });
+  } catch {
+    throw new Error(
+      'Tailscale CLI not found. Install Tailscale on this PC: https://tailscale.com/download'
+    );
+  }
+
+  let ip = '';
+  try {
+    ip = execFileSync(bin, ['ip', '-4'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+      .trim()
+      .split(/\s+/)[0];
+  } catch {
+    throw new Error(
+      'Tailscale is installed but not connected. Open the Tailscale app and log in, then retry.'
+    );
+  }
+
+  if (!ip || !/^100\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    throw new Error(
+      `Could not read a Tailscale IPv4 address (got "${ip || 'empty'}"). Is Tailscale connected?`
+    );
+  }
+
+  // No cloud tunnel process — clear any previous tunnel pid
+  try {
+    if (fs.existsSync(TUNNEL_PID_PATH)) fs.unlinkSync(TUNNEL_PID_PATH);
+  } catch {
+    /* ignore */
+  }
+
+  const publicWsUrl = `ws://${ip}:${localPort}`;
+  const info = {
+    publicWsUrl,
+    httpsUrl: null,
+    localPort,
+    pid: null,
+    provider: 'tailscale',
+    tailscaleIp: ip,
+    createdAt: new Date().toISOString(),
+    note: 'Friend must be on the same Tailscale network (tailnet).',
+  };
+  writeConnection(info);
+  return info;
+}
+
 /**
- * Opens a public tunnel to the local relay (no VPS).
- * Default: localtunnel (pure npm). Optional: Cloudflare via SS_TUNNEL=cloudflare
+ * Opens connectivity for the local relay.
+ * Modes via SS_TUNNEL:
+ *   localtunnel (default) | cloudflare | tailscale
  */
 async function startInternetTunnel(localPort) {
   const mode = (process.env.SS_TUNNEL || 'localtunnel').toLowerCase();
+
+  if (mode === 'tailscale' || mode === 'ts') {
+    return startTailscaleEndpoint(localPort);
+  }
 
   if (mode === 'cloudflare' || mode === 'cf') {
     return startCloudflareTunnel(localPort);
   }
 
-  // Explicit localtunnel (or any non-cloudflare value)
   return startLocalTunnel(localPort);
 }
 
@@ -260,6 +332,7 @@ module.exports = {
   CONNECTION_PATH,
   ensureCloudflared,
   startInternetTunnel,
+  startTailscaleEndpoint,
   readConnection,
   clearConnection,
   toWsUrl,

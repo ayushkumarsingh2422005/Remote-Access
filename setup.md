@@ -112,9 +112,44 @@ ss config set unlockInputShortcut Ctrl+Alt+U
 
 Then restart the host agent (`ss stop all` → `ss start all`).
 
-### Optional: more reliable Cloudflare tunnel
+### Connection modes (3 options)
 
-If localtunnel feels flaky, use Cloudflare’s free quick tunnel instead (downloads a small helper once, still no account/VPS):
+Set `SS_TUNNEL` in the host terminal before `ss start all`. Existing modes stay the same.
+
+| Mode | Command (Windows PowerShell) | Best for |
+|------|------------------------------|----------|
+| **localtunnel** (default) | `ss start all` | Quick try, phone hotspot |
+| **cloudflare** | `$env:SS_TUNNEL="cloudflare"; ss start all` | When loca.lt is flaky |
+| **tailscale** | `$env:SS_TUNNEL="tailscale"; ss start all` | College LAN / lower latency / reliability |
+
+**macOS / Linux:** `SS_TUNNEL=cloudflare ss start all` or `SS_TUNNEL=tailscale ss start all`
+
+---
+
+### Tailscale mode (recommended for college / long sessions)
+
+Both PCs need [Tailscale](https://tailscale.com/download) installed and logged into the **same** account (or same shared tailnet).
+
+1. Install Tailscale on **host** and **controller**; wait until status is Connected.  
+2. On the **host**:
+
+```powershell
+$env:SS_TUNNEL="tailscale"
+ss start all
+```
+
+3. Send the printed line to your friend, e.g. `ss connect ws://100.x.x.x:9000`  
+4. Friend must also have Tailscale connected, then run that `ss connect …` command.
+
+No public tunnel URL is created — traffic stays on your private Tailscale network (usually works on campus Wi‑Fi and is lower latency than a far VPS).
+
+If Windows Firewall blocks it the first time, allow Node.js / port `9000` inbound when prompted, or temporarily allow the port for private networks.
+
+---
+
+### Optional: Cloudflare tunnel
+
+If localtunnel feels flaky, use Cloudflare’s free quick tunnel (downloads a small helper once, still no account/VPS):
 
 **Windows (PowerShell):**
 
@@ -131,30 +166,21 @@ SS_TUNNEL=cloudflare ss start all
 
 The share link will look like `wss://….trycloudflare.com`.
 
-### Switch back to localtunnel (leave Cloudflare)
+### Switch mode / go back to localtunnel
 
-`$env:SS_TUNNEL` only affects the **current** terminal. To stop using Cloudflare:
+`$env:SS_TUNNEL` only affects the **current** terminal.
 
-**Windows (PowerShell) — same window where you set it:**
+**Windows (PowerShell):**
 
 ```powershell
 Remove-Item Env:SS_TUNNEL
-```
-
-Or force localtunnel:
-
-```powershell
+# or:
 $env:SS_TUNNEL="localtunnel"
-```
-
-Then restart:
-
-```powershell
 ss stop all
 ss start all
 ```
 
-**macOS / Linux:** just open a new terminal (or unset the variable) and run `ss start all` normally — do **not** prefix with `SS_TUNNEL=cloudflare`.
+**macOS / Linux:**
 
 ```bash
 unset SS_TUNNEL
@@ -240,7 +266,8 @@ ss start all
 | Problem | What to try |
 |---------|-------------|
 | `ss` not found | Run `npm link --workspace=ss` again from the project root, or use `npm run ss -- start all` |
-| Tunnel timeout | Check host internet; run `ss start all` again; or try Cloudflare mode below |
+| Tunnel timeout | Check host internet; try `$env:SS_TUNNEL="cloudflare"` or `"tailscale"` |
+| College LAN / WARP issues | Prefer Tailscale mode; turn WARP off while sharing |
 | Viewer cannot reach relay | Host must keep `ss start all` running; use the **latest** URL from `ss share` |
 | Browser password page on loca.lt | Use Cloudflare mode: `$env:SS_TUNNEL="cloudflare"; ss start all` |
 | Black / waiting screen | Confirm both PCs use the same `pairCode` (`ss config`) |

@@ -2,7 +2,13 @@
 
 Lightweight remote desktop for personal use between two computers. One machine **shares** its screen; the other **views and controls** it.
 
-No accounts. No VPS required for internet use — `ss start all` opens a free public tunnel automatically (see [setup.md](./setup.md)).
+No accounts. No VPS required — pick a connection mode (see [setup.md](./setup.md)):
+
+| Mode | Host command |
+|------|----------------|
+| localtunnel (default) | `ss start all` |
+| Cloudflare | `$env:SS_TUNNEL="cloudflare"; ss start all` |
+| Tailscale | `$env:SS_TUNNEL="tailscale"; ss start all` |
 
 ## Quick links
 
