@@ -218,15 +218,19 @@ function setupHotkeys() {
 
   const lockSpec = config.lockInputShortcut || 'Ctrl+Alt+L';
   const unlockSpec = config.unlockInputShortcut || 'Ctrl+Alt+U';
-  log(`host hotkeys: lock=${lockSpec} unlock=${unlockSpec}`);
 
-  stopHotkeys = startHostHotkeys({
-    lockSpec,
-    unlockSpec,
-    onLock: () => setInputEnabled(false),
-    onUnlock: () => setInputEnabled(true),
-    log,
-  });
+  try {
+    stopHotkeys = startHostHotkeys({
+      lockSpec,
+      unlockSpec,
+      onLock: () => setInputEnabled(false),
+      onUnlock: () => setInputEnabled(true),
+      log,
+    });
+  } catch (err) {
+    log('hotkeys setup failed (agent continues):', err.message);
+    stopHotkeys = null;
+  }
 }
 
 async function applyInput(event) {

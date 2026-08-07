@@ -44,6 +44,7 @@ Stop on the host: `ss stop all`
 ss start all     Relay + internet tunnel + silent agent
 ss stop all      Stop everything
 ss share         Show the public link again
+ss logs          Follow live agent/relay logs (Ctrl+C to stop)
 ss connect <url> Controller: save URL and open viewer
 ss viewer        Open viewer only
 ss status        Running state

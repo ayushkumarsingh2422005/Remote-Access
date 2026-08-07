@@ -141,6 +141,96 @@ function status() {
   console.log(`  log:      ${LOG_PATH}`);
 }
 
+function showLastLines(filePath, lines) {
+  if (!fs.existsSync(filePath)) {
+    console.log(`No log file yet: ${filePath}`);
+    return;
+  }
+  const text = fs.readFileSync(filePath, 'utf8');
+  const all = text.split(/\r?\n/);
+  const slice = all.slice(Math.max(0, all.length - lines));
+  process.stdout.write(slice.join('\n'));
+  if (!text.endsWith('\n') && slice.length) process.stdout.write('\n');
+}
+
+function followLogs(filePath) {
+  ensureAppDir();
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, '');
+  }
+
+  console.log(`Live logs: ${filePath}`);
+  console.log('Press Ctrl+C to stop.\n');
+
+  showLastLines(filePath, 40);
+
+  let offset = fs.statSync(filePath).size;
+
+  const printNew = () => {
+    try {
+      if (!fs.existsSync(filePath)) return;
+      const stat = fs.statSync(filePath);
+      if (stat.size < offset) {
+        // log was truncated/rotated
+        offset = 0;
+      }
+      if (stat.size === offset) return;
+      const fd = fs.openSync(filePath, 'r');
+      const len = stat.size - offset;
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, offset);
+      fs.closeSync(fd);
+      offset = stat.size;
+      process.stdout.write(buf.toString('utf8'));
+    } catch {
+      /* ignore transient read errors */
+    }
+  };
+
+  const timer = setInterval(printNew, 400);
+  try {
+    fs.watch(filePath, { persistent: true }, () => printNew());
+  } catch {
+    /* watch unavailable — interval is enough */
+  }
+
+  const stop = () => {
+    clearInterval(timer);
+    console.log('\nStopped following logs.');
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+}
+
+function logsCmd(args) {
+  const follow =
+    !args.includes('--once') &&
+    !args.includes('-1') &&
+    args[0] !== 'once';
+
+  if (args[0] === 'clear' || args.includes('--clear')) {
+    ensureAppDir();
+    fs.writeFileSync(LOG_PATH, '');
+    console.log(`Cleared log: ${LOG_PATH}`);
+    return;
+  }
+
+  let lines = 40;
+  const nIdx = args.findIndex((a) => a === '-n' || a === '--lines');
+  if (nIdx >= 0 && args[nIdx + 1]) {
+    lines = Math.max(1, Number(args[nIdx + 1]) || 40);
+  }
+
+  if (!follow) {
+    console.log(`Log file: ${LOG_PATH}\n`);
+    showLastLines(LOG_PATH, lines);
+    return;
+  }
+
+  followLogs(LOG_PATH);
+}
+
 function printHelp() {
   console.log(`
 ss — Screen Share remote desktop
@@ -154,6 +244,9 @@ Usage:
   ss stop relay         Stop the local relay server
   ss status             Show running state
   ss share              Show the public link to send your friend
+  ss logs               Follow live agent/relay logs (Ctrl+C to stop)
+  ss logs --once        Print recent log lines and exit
+  ss logs clear         Clear the log file
   ss connect <url>      Controller: save public link and open viewer
   ss viewer             Open the remote viewer (controller)
   ss config             Show config path and values
@@ -339,6 +432,10 @@ async function main() {
       break;
     case 'share':
       share();
+      break;
+    case 'logs':
+    case 'log':
+      logsCmd([sub, ...rest].filter(Boolean));
       break;
     case 'connect':
       connectCmd(sub);

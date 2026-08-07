@@ -70,6 +70,9 @@ Useful host commands:
 ```bash
 ss status          # see if relay / tunnel / agent are up
 ss share           # print the public link again
+ss logs            # live agent/relay logs (Ctrl+C to stop)
+ss logs --once     # print recent lines and exit
+ss logs clear      # empty the log file
 ss stop all        # stop sharing
 ```
 
@@ -81,6 +84,8 @@ While the agent is running, use these on the **host keyboard** (works even if an
 |----------|--------|
 | `Ctrl+Alt+L` | Disable remote mouse & keyboard (screen share continues) |
 | `Ctrl+Alt+U` | Resume remote mouse & keyboard |
+
+On Windows these use the built-in hotkey API (no extra binary). If a shortcut is already taken by another app, change it with `ss config set`.
 
 The controller sees a label: **Keyboard and Mouse disabled**.
 
