@@ -40,6 +40,8 @@ const DEFAULT_CONFIG = {
   // Host-side global shortcuts (sender PC)
   lockInputShortcut: 'Ctrl+Alt+L',
   unlockInputShortcut: 'Ctrl+Alt+U',
+  // After host stops using mouse/keyboard, wait this many ms before giving control back
+  hostPriorityMs: 2000,
 };
 
 function ensureAppDir() {

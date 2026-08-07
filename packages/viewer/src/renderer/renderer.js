@@ -79,22 +79,21 @@ function mapCoords(clientX, clientY) {
   };
 }
 
-function setInputEnabled(enabled, message) {
+function setInputEnabled(enabled, message, reason) {
   inputEnabled = enabled !== false;
   viewport.classList.toggle('input-disabled', !inputEnabled);
   inputLockEl.hidden = inputEnabled;
-  inputLockEl.textContent = message || 'Keyboard and Mouse disabled';
+  inputLockEl.classList.toggle('host', reason === 'host');
+  inputLockEl.textContent = message || (
+    inputEnabled ? 'Keyboard and Mouse enabled' : 'Keyboard and Mouse disabled'
+  );
 
   if (!inputEnabled) {
-    // Release any held keys locally so we don't leave sticky state
-    for (const code of pressedKeys) {
-      /* do not send while locked */
-    }
     pressedKeys.clear();
     latestNorm = null;
     cursorEl.style.opacity = '0';
     statusEl.className = 'status waiting';
-    statusEl.textContent = 'Keyboard and Mouse disabled';
+    statusEl.textContent = message || 'Keyboard and Mouse disabled';
   } else {
     statusEl.className = 'status ready';
     statusEl.textContent = 'Live — you have full control';
@@ -305,7 +304,7 @@ window.addEventListener('blur', () => {
 window.ssRemote.onStatus(setStatus);
 
 window.ssRemote.onInputState((data) => {
-  setInputEnabled(data.enabled !== false, data.message);
+  setInputEnabled(data.enabled !== false, data.message, data.reason);
 });
 
 window.ssRemote.onFrame((frame) => {

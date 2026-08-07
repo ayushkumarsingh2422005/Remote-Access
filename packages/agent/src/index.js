@@ -41,7 +41,11 @@ let screenMeta = { width: 1920, height: 1080, scale: 1 };
 let nativeSize = { width: 1920, height: 1080 };
 let capturing = false;
 let controllerConnected = false;
-let inputEnabled = true; // remote mouse/keyboard allowed
+let manualLock = false; // Ctrl+Alt+L
+let hostBusy = false; // host is using local mouse/keyboard
+let hostIdleTimer = null;
+let lastBroadcastEnabled = true;
+let lastBroadcastReason = 'enabled';
 let lastClipboardSent = '';
 let lastClipboardApplied = '';
 let applyingClipboard = false;
@@ -109,12 +113,8 @@ const KEY_MAP = {
 };
 
 function resolveKey(name, code) {
-  if (code && KEY_MAP[code.replace(/^Key/, '').replace(/^Digit/, '')]) {
-    /* fall through */
-  }
   if (!name && !code) return null;
   if (KEY_MAP[name]) return KEY_MAP[name];
-  // Prefer e.code style (KeyA, Digit1) for layout-independent mapping
   if (code) {
     if (code.startsWith('Key') && code.length === 4) {
       const letter = code.slice(3);
@@ -183,27 +183,75 @@ async function flushMouseMove() {
   }
 }
 
-function broadcastInputState() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(
-    encodeMessage(MessageType.INPUT_STATE, {
-      enabled: inputEnabled,
-      message: inputEnabled
-        ? 'Keyboard and Mouse enabled'
-        : 'Keyboard and Mouse disabled',
-    })
-  );
-  log(inputEnabled ? 'remote input ENABLED' : 'remote input DISABLED');
+function isInputEnabled() {
+  return !manualLock && !hostBusy;
 }
 
-function setInputEnabled(enabled) {
-  if (inputEnabled === enabled) {
-    broadcastInputState();
+function inputStateMessage() {
+  if (manualLock) return 'Keyboard and Mouse disabled';
+  if (hostBusy) return 'Host is using this PC';
+  return 'Keyboard and Mouse enabled';
+}
+
+function inputStateReason() {
+  if (manualLock) return 'manual';
+  if (hostBusy) return 'host';
+  return 'enabled';
+}
+
+function broadcastInputState(force = false) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const enabled = isInputEnabled();
+  const reason = inputStateReason();
+  const message = inputStateMessage();
+  if (
+    !force &&
+    enabled === lastBroadcastEnabled &&
+    reason === lastBroadcastReason
+  ) {
     return;
   }
-  inputEnabled = enabled;
-  pendingMove = null;
+  lastBroadcastEnabled = enabled;
+  lastBroadcastReason = reason;
+  ws.send(
+    encodeMessage(MessageType.INPUT_STATE, {
+      enabled,
+      reason,
+      message,
+    })
+  );
+  log(`remote input ${enabled ? 'ENABLED' : 'DISABLED'} (${reason})`);
+}
+
+function syncInputGate() {
+  if (!isInputEnabled()) {
+    pendingMove = null;
+  }
   broadcastInputState();
+}
+
+function setManualLock(locked) {
+  manualLock = !!locked;
+  syncInputGate();
+}
+
+function onHostPhysicalActivity() {
+  // Host always wins while they are actively using the machine
+  const wasBusy = hostBusy;
+  hostBusy = true;
+  if (hostIdleTimer) clearTimeout(hostIdleTimer);
+  const idleMs = Math.max(500, Number(config.hostPriorityMs) || 2000);
+  hostIdleTimer = setTimeout(() => {
+    hostIdleTimer = null;
+    hostBusy = false;
+    syncInputGate();
+  }, idleMs);
+
+  if (!wasBusy) {
+    syncInputGate();
+  } else {
+    // Still busy — only refresh timer; no spam broadcast
+  }
 }
 
 function setupHotkeys() {
@@ -223,8 +271,9 @@ function setupHotkeys() {
     stopHotkeys = startHostHotkeys({
       lockSpec,
       unlockSpec,
-      onLock: () => setInputEnabled(false),
-      onUnlock: () => setInputEnabled(true),
+      onLock: () => setManualLock(true),
+      onUnlock: () => setManualLock(false),
+      onHostActivity: () => onHostPhysicalActivity(),
       log,
     });
   } catch (err) {
@@ -234,7 +283,7 @@ function setupHotkeys() {
 }
 
 async function applyInput(event) {
-  if (!inputEnabled) return;
+  if (!isInputEnabled()) return;
   try {
     if (event.action === 'mousemove') {
       pendingMove = toNativeCoords(event);
@@ -443,7 +492,7 @@ function connect() {
       log('controller connected — sharing screen');
       controllerConnected = true;
       startCaptureLoop();
-      broadcastInputState();
+      broadcastInputState(true);
     }
 
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.CONTROLLER) {
@@ -453,12 +502,12 @@ function connect() {
     }
 
     if (msg.type === MessageType.INPUT && msg.event) {
-      if (!inputEnabled) return;
+      if (!isInputEnabled()) return;
       await applyInput(msg.event);
     }
 
     if (msg.type === MessageType.CLIPBOARD && msg.from === Role.CONTROLLER) {
-      if (!inputEnabled) return;
+      if (!isInputEnabled()) return;
       await applyClipboardText(msg.text || '');
     }
   });
@@ -485,6 +534,10 @@ function scheduleReconnect() {
 
 function shutdown() {
   stopCaptureLoop();
+  if (hostIdleTimer) {
+    clearTimeout(hostIdleTimer);
+    hostIdleTimer = null;
+  }
   if (stopHotkeys) {
     try {
       stopHotkeys();

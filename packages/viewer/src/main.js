@@ -184,6 +184,7 @@ function connectRelay() {
     if (msg.type === MessageType.INPUT_STATE) {
       sendToRenderer('input-state', {
         enabled: msg.enabled !== false,
+        reason: msg.reason || (msg.enabled !== false ? 'enabled' : 'manual'),
         message: msg.message || (
           msg.enabled !== false
             ? 'Keyboard and Mouse enabled'

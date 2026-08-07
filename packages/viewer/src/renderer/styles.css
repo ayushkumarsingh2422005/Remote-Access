@@ -168,6 +168,11 @@ code {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+.input-lock.host {
+  border-color: rgba(230, 184, 77, 0.65);
+  color: #ffe2a0;
+}
+
 .viewport.input-disabled #screen {
   cursor: not-allowed;
 }

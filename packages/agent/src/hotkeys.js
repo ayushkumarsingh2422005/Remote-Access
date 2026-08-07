@@ -76,7 +76,7 @@ function modsToFlags(parsed) {
   return flags;
 }
 
-function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, log }) {
+function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostActivity, log }) {
   const lock = parseShortcut(lockSpec);
   const unlock = parseShortcut(unlockSpec);
   const lockVk = keyToVk(lock.key);
@@ -119,6 +119,11 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, log }) {
   const handleLine = (line) => {
     const msg = String(line || '').trim();
     if (!msg) return;
+    if (msg === 'READY') return;
+    if (msg === 'HOST_ACTIVITY') {
+      if (typeof onHostActivity === 'function') onHostActivity();
+      return;
+    }
     const now = Date.now();
     if (now - lastFire < 350) return;
     if (msg === 'LOCK') {
