@@ -45,6 +45,15 @@ function updateMeta() {
 
 function setStatus(data) {
   const state = data.state || 'unknown';
+
+  // Don't overwrite lock / host-priority message in the header
+  if (!inputEnabled && (state === 'ready' || state === 'connected')) {
+    if (data.pairCode) pairCode = data.pairCode;
+    if (data.relayUrl) relayUrl = data.relayUrl;
+    updateMeta();
+    return;
+  }
+
   statusEl.className = `status ${state}`;
   statusEl.textContent =
     data.message ||
@@ -82,21 +91,25 @@ function mapCoords(clientX, clientY) {
 function setInputEnabled(enabled, message, reason) {
   inputEnabled = enabled !== false;
   viewport.classList.toggle('input-disabled', !inputEnabled);
-  inputLockEl.hidden = inputEnabled;
-  inputLockEl.classList.toggle('host', reason === 'host');
-  inputLockEl.textContent = message || (
-    inputEnabled ? 'Keyboard and Mouse enabled' : 'Keyboard and Mouse disabled'
-  );
 
-  if (!inputEnabled) {
+  if (inputEnabled) {
+    inputLockEl.hidden = true;
+    inputLockEl.classList.remove('host', 'manual');
+    statusEl.className = 'status ready';
+    statusEl.textContent = 'Live — you have full control';
+  } else {
+    const label = message || (
+      reason === 'host' ? 'Host is using this PC' : 'Keyboard and Mouse disabled'
+    );
+    inputLockEl.hidden = false;
+    inputLockEl.classList.toggle('host', reason === 'host');
+    inputLockEl.classList.toggle('manual', reason !== 'host');
+    inputLockEl.textContent = label;
+    statusEl.className = 'status waiting';
+    statusEl.textContent = label;
     pressedKeys.clear();
     latestNorm = null;
     cursorEl.style.opacity = '0';
-    statusEl.className = 'status waiting';
-    statusEl.textContent = message || 'Keyboard and Mouse disabled';
-  } else {
-    statusEl.className = 'status ready';
-    statusEl.textContent = 'Live — you have full control';
   }
 }
 
@@ -131,15 +144,16 @@ function queueMove(coords) {
 function updateLocalCursor(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const viewRect = viewport.getBoundingClientRect();
-  const x = clientX - viewRect.left;
-  const y = clientY - viewRect.top;
+  // Center the red dot on the pointer
+  const x = clientX - viewRect.left - 5;
+  const y = clientY - viewRect.top - 5;
   const inside =
     clientX >= rect.left &&
     clientX <= rect.right &&
     clientY >= rect.top &&
     clientY <= rect.bottom;
   cursorEl.style.opacity = inside ? '1' : '0';
-  cursorEl.style.transform = `translate(${x}px, ${y}px) rotate(-20deg)`;
+  cursorEl.style.transform = `translate(${x}px, ${y}px)`;
 }
 
 function isMod(e) {
