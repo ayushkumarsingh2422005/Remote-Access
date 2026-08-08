@@ -20,6 +20,11 @@ let lastClipboardApplied = '';
 let applyingClipboard = false;
 let latestFrame = null;
 let frameFlushScheduled = false;
+let lastInputState = {
+  enabled: true,
+  reason: 'enabled',
+  message: 'Keyboard and Mouse enabled',
+};
 const config = loadConfig();
 
 function createWindow() {
@@ -39,9 +44,40 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.webContents.on('did-finish-load', () => {
+    // Replay latest lock/host state — IPC before load is dropped
+    sendToRenderer('input-state', lastInputState);
+    sendToRenderer('status', {
+      state: ws && ws.readyState === WebSocket.OPEN ? 'connected' : 'connecting',
+      relayUrl: config.relayUrl,
+      pairCode: config.pairCode,
+    });
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+function applyInputState(msg) {
+  const enabled = msg.enabled !== false && msg.enabled !== 'false';
+  lastInputState = {
+    enabled,
+    reason: msg.reason || (enabled ? 'enabled' : 'manual'),
+    message:
+      msg.message ||
+      (enabled
+        ? 'Keyboard and Mouse enabled'
+        : 'Keyboard and Mouse disabled'),
+  };
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setTitle(
+      enabled
+        ? 'SS Remote — Controller'
+        : `SS Remote — ${lastInputState.message}`
+    );
+  }
+  sendToRenderer('input-state', lastInputState);
 }
 
 function sendToRenderer(channel, payload) {
@@ -197,16 +233,8 @@ function connectRelay() {
       sendToRenderer('clipboard', { text: msg.text || '', from: 'host' });
     }
 
-    if (msg.type === MessageType.INPUT_STATE) {
-      sendToRenderer('input-state', {
-        enabled: msg.enabled !== false,
-        reason: msg.reason || (msg.enabled !== false ? 'enabled' : 'manual'),
-        message: msg.message || (
-          msg.enabled !== false
-            ? 'Keyboard and Mouse enabled'
-            : 'Keyboard and Mouse disabled'
-        ),
-      });
+    if (msg.type === MessageType.INPUT_STATE || msg.type === 'input_state') {
+      applyInputState(msg);
     }
 
     if (msg.type === MessageType.ERROR) {
@@ -216,6 +244,14 @@ function connectRelay() {
 
   ws.on('close', () => {
     stopClipboardSync();
+    lastInputState = {
+      enabled: true,
+      reason: 'enabled',
+      message: 'Keyboard and Mouse enabled',
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setTitle('SS Remote — Controller');
+    }
     sendToRenderer('status', { state: 'disconnected', message: 'Relay disconnected' });
     if (!reconnectTimer) {
       reconnectTimer = setTimeout(() => {
@@ -252,6 +288,7 @@ ipcMain.on('clipboard-to-host', (_event, text) => {
 });
 
 ipcMain.handle('get-config', () => loadConfig());
+ipcMain.handle('get-input-state', () => lastInputState);
 ipcMain.handle('read-clipboard', () => {
   try {
     return clipboard.readText();

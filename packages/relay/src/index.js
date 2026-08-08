@@ -93,15 +93,19 @@ function startRelay(port) {
         return;
       }
 
+      // Forward all peer traffic after register (do not whitelist types —
+      // older relays that omitted input_state dropped lock/host status).
       if (
-        msg.type === MessageType.FRAME ||
-        msg.type === MessageType.INPUT ||
-        msg.type === MessageType.SCREEN_INFO ||
-        msg.type === MessageType.CLIPBOARD ||
-        msg.type === MessageType.INPUT_STATE
+        msg.type === MessageType.REGISTERED ||
+        msg.type === MessageType.PEER_JOINED ||
+        msg.type === MessageType.PEER_LEFT ||
+        msg.type === MessageType.PING ||
+        msg.type === MessageType.PONG ||
+        msg.type === MessageType.ERROR
       ) {
-        forwardRaw(ws, raw);
+        return;
       }
+      forwardRaw(ws, raw);
     });
 
     ws.on('close', () => {

@@ -4,6 +4,7 @@ const placeholder = document.getElementById('placeholder');
 const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
 const inputLockEl = document.getElementById('input-lock');
+const controlBadgeEl = document.getElementById('control-badge');
 const statusEl = document.getElementById('status');
 const metaPairEl = document.getElementById('meta-pair');
 const metaControlEl = document.getElementById('meta-control');
@@ -37,27 +38,40 @@ function shortRelay(url) {
   }
 }
 
-function updateMeta() {
-  metaPairEl.textContent = pairCode ? `pair: ${pairCode}` : '';
+function showEl(el, visible) {
+  if (!el) return;
+  if (visible) el.removeAttribute('hidden');
+  else el.setAttribute('hidden', '');
+}
 
-  if (!inputEnabled && controlLabel) {
-    metaControlEl.hidden = false;
-    metaControlEl.textContent = controlLabel;
-    metaControlEl.classList.toggle('host', controlReason === 'host');
-    metaControlEl.classList.toggle('manual', controlReason !== 'host');
-  } else {
-    metaControlEl.hidden = true;
-    metaControlEl.textContent = '';
-    metaControlEl.classList.remove('host', 'manual');
+function updateMeta() {
+  if (metaPairEl) {
+    metaPairEl.textContent = pairCode ? `pair: ${pairCode}` : '';
   }
 
-  const rest = [
-    relayUrl ? shortRelay(relayUrl) : null,
-    `${fps} fps`,
-  ]
-    .filter(Boolean)
-    .join('  ·  ');
-  metaRestEl.textContent = rest ? `·  ${rest}` : '';
+  const locked = !inputEnabled && !!controlLabel;
+  if (metaControlEl) {
+    if (locked) {
+      metaControlEl.textContent = controlLabel;
+      metaControlEl.classList.toggle('host', controlReason === 'host');
+      metaControlEl.classList.toggle('manual', controlReason !== 'host');
+      showEl(metaControlEl, true);
+    } else {
+      metaControlEl.textContent = '';
+      metaControlEl.classList.remove('host', 'manual');
+      showEl(metaControlEl, false);
+    }
+  }
+
+  if (metaRestEl) {
+    const rest = [
+      relayUrl ? shortRelay(relayUrl) : null,
+      `${fps} fps`,
+    ]
+      .filter(Boolean)
+      .join('  ·  ');
+    metaRestEl.textContent = rest ? `·  ${rest}` : '';
+  }
 }
 
 function setStatus(data) {
@@ -105,30 +119,45 @@ function mapCoords(clientX, clientY) {
 }
 
 function setInputEnabled(enabled, message, reason) {
-  inputEnabled = enabled !== false;
-  viewport.classList.toggle('input-disabled', !inputEnabled);
+  inputEnabled = enabled !== false && enabled !== 'false';
+  if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
 
   if (inputEnabled) {
     controlLabel = '';
     controlReason = '';
-    inputLockEl.hidden = true;
-    inputLockEl.classList.remove('host', 'manual');
+    showEl(inputLockEl, false);
+    if (inputLockEl) inputLockEl.classList.remove('host', 'manual');
+    showEl(controlBadgeEl, false);
+    if (controlBadgeEl) controlBadgeEl.classList.remove('host', 'manual');
     statusEl.className = 'status ready';
     statusEl.textContent = 'Live — you have full control';
   } else {
     controlReason = reason === 'host' ? 'host' : 'manual';
-    controlLabel = message || (
-      controlReason === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled'
-    );
-    inputLockEl.hidden = false;
-    inputLockEl.classList.toggle('host', controlReason === 'host');
-    inputLockEl.classList.toggle('manual', controlReason !== 'host');
-    inputLockEl.textContent = controlLabel;
+    controlLabel =
+      message ||
+      (controlReason === 'host'
+        ? 'Host is using this PC'
+        : 'Keyboard & Mouse disabled');
+
+    showEl(inputLockEl, true);
+    if (inputLockEl) {
+      inputLockEl.classList.toggle('host', controlReason === 'host');
+      inputLockEl.classList.toggle('manual', controlReason !== 'host');
+      inputLockEl.textContent = controlLabel;
+    }
+
+    showEl(controlBadgeEl, true);
+    if (controlBadgeEl) {
+      controlBadgeEl.classList.toggle('host', controlReason === 'host');
+      controlBadgeEl.classList.toggle('manual', controlReason !== 'host');
+      controlBadgeEl.textContent = controlLabel;
+    }
+
     statusEl.className = 'status waiting';
     statusEl.textContent = controlLabel;
     pressedKeys.clear();
     latestNorm = null;
-    cursorEl.style.opacity = '0';
+    if (cursorEl) cursorEl.style.opacity = '0';
   }
   updateMeta();
 }
@@ -355,8 +384,15 @@ window.addEventListener('blur', () => {
 window.ssRemote.onStatus(setStatus);
 
 window.ssRemote.onInputState((data) => {
-  setInputEnabled(data.enabled !== false, data.message, data.reason);
+  setInputEnabled(data.enabled !== false && data.enabled !== 'false', data.message, data.reason);
 });
+
+// Pull cached state in case the first IPC event arrived before listeners bound
+if (typeof window.ssRemote.getInputState === 'function') {
+  window.ssRemote.getInputState().then((data) => {
+    if (data) setInputEnabled(data.enabled !== false && data.enabled !== 'false', data.message, data.reason);
+  }).catch(() => {});
+}
 
 window.ssRemote.onFrame((frame) => {
   const hasImage = frame && (frame.jpeg || frame.data);

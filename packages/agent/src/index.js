@@ -669,5 +669,9 @@ refreshNativeSize()
 setInterval(() => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(encodeMessage(MessageType.PING));
+    // Keep controller UI in sync if an earlier input_state was dropped
+    if (!isInputEnabled()) {
+      broadcastInputState(true);
+    }
   }
 }, 15000);
