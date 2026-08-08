@@ -62,7 +62,9 @@ public static class SsHostWatch {
   public const int WM_MOUSEHWHEEL = 0x020E;
   public const int WM_MOUSEMOVE = 0x0200;
   public const uint LLKHF_INJECTED = 0x10;
+  public const uint LLKHF_LOWER_IL_INJECTED = 0x02;
   public const uint LLMHF_INJECTED = 0x01;
+  public const uint LLMHF_LOWER_IL_INJECTED = 0x02;
 
   public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -115,7 +117,7 @@ public static class SsHostWatch {
       int msg = wParam.ToInt32();
       if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         KBDLLHOOKSTRUCT hs = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-        if ((hs.flags & LLKHF_INJECTED) == 0) {
+        if ((hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) == 0) {
           EmitActivity();
         }
       }
@@ -132,7 +134,7 @@ public static class SsHostWatch {
       if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
           msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
         MSLLHOOKSTRUCT hs = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-        if ((hs.flags & LLMHF_INJECTED) == 0) {
+        if ((hs.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) == 0) {
           EmitActivity();
         }
       }

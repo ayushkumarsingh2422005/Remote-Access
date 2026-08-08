@@ -46,7 +46,8 @@ let controllerConnected = false;
 let manualLock = false; // Ctrl+Alt+L
 let hostBusy = false; // host is using local mouse/keyboard
 let hostIdleTimer = null;
-let suppressHostUntil = 0; // ignore "host activity" caused by our own remote injection
+let suppressHostUntil = 0; // ignore brief inject echoes not marked INJECTED by Windows
+let suppressEchoSkips = 0; // allow real host takeover if activity continues during grace
 let lastBroadcastEnabled = true;
 let lastBroadcastReason = 'enabled';
 let lastClipboardSent = '';
@@ -173,9 +174,9 @@ async function flushMouseMove() {
   const next = pendingMove;
   pendingMove = null;
   try {
-    noteRemoteInject();
+    // Do NOT call noteRemoteInject here — host hooks ignore mouse-move,
+    // and refreshing grace on every move blocked real host takeover.
     await mouse.setPosition(new Point(next.x, next.y));
-    noteRemoteInject();
   } catch (err) {
     log('move error:', err.message);
   } finally {
@@ -240,36 +241,44 @@ function setManualLock(locked) {
   syncInputGate();
 }
 
-/** Remote injection is often not marked INJECTED by Windows — ignore echo as "host". */
+/**
+ * Remote click/key injection is sometimes not marked INJECTED by Windows.
+ * Briefly ignore host-activity echoes after those injects only (not mouse-move).
+ */
 function noteRemoteInject() {
-  const pad = Math.max(400, Number(config.hostInjectGraceMs) || 700);
+  const pad = Math.max(250, Number(config.hostInjectGraceMs) || 450);
   suppressHostUntil = Date.now() + pad;
+  suppressEchoSkips = 0;
 }
 
-function onHostPhysicalActivity() {
-  // Ignore activity that is just our own remote mouse/keyboard echoing back
-  if (Date.now() < suppressHostUntil) return;
-
-  const wasBusy = hostBusy;
-  hostBusy = true;
+function armHostIdleTimer() {
   if (hostIdleTimer) clearTimeout(hostIdleTimer);
   const idleMs = Math.max(500, Number(config.hostPriorityMs) || 2000);
   hostIdleTimer = setTimeout(() => {
     hostIdleTimer = null;
-    // Don't re-enable during an active remote inject window
-    if (Date.now() < suppressHostUntil) {
-      hostIdleTimer = setTimeout(() => {
-        hostIdleTimer = null;
-        if (Date.now() >= suppressHostUntil) {
-          hostBusy = false;
-          syncInputGate();
-        }
-      }, suppressHostUntil - Date.now() + 50);
-      return;
-    }
     hostBusy = false;
     syncInputGate();
   }, idleMs);
+}
+
+function onHostPhysicalActivity() {
+  const now = Date.now();
+  // First spike during inject grace is likely our own echo. Sustained activity
+  // (2+ events) means the real host is using the PC — let them take over.
+  if (now < suppressHostUntil) {
+    suppressEchoSkips += 1;
+    if (suppressEchoSkips < 2) return;
+  } else {
+    suppressEchoSkips = 0;
+  }
+
+  // Host wins — stop treating leftover inject grace as a block
+  suppressHostUntil = 0;
+  suppressEchoSkips = 0;
+
+  const wasBusy = hostBusy;
+  hostBusy = true;
+  armHostIdleTimer();
 
   if (!wasBusy) {
     syncInputGate();
