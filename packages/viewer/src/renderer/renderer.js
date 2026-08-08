@@ -5,7 +5,9 @@ const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
 const inputLockEl = document.getElementById('input-lock');
 const statusEl = document.getElementById('status');
-const metaEl = document.getElementById('meta');
+const metaPairEl = document.getElementById('meta-pair');
+const metaControlEl = document.getElementById('meta-control');
+const metaRestEl = document.getElementById('meta-rest');
 
 let frameW = 0;
 let frameH = 0;
@@ -20,6 +22,8 @@ let relayUrl = '';
 let drawing = false;
 let pendingFrame = null;
 let inputEnabled = true;
+let controlLabel = '';
+let controlReason = '';
 const MOVE_INTERVAL_MS = 16;
 
 function shortRelay(url) {
@@ -34,19 +38,31 @@ function shortRelay(url) {
 }
 
 function updateMeta() {
-  metaEl.textContent = [
-    pairCode ? `pair: ${pairCode}` : null,
+  metaPairEl.textContent = pairCode ? `pair: ${pairCode}` : '';
+
+  if (!inputEnabled && controlLabel) {
+    metaControlEl.hidden = false;
+    metaControlEl.textContent = controlLabel;
+    metaControlEl.classList.toggle('host', controlReason === 'host');
+    metaControlEl.classList.toggle('manual', controlReason !== 'host');
+  } else {
+    metaControlEl.hidden = true;
+    metaControlEl.textContent = '';
+    metaControlEl.classList.remove('host', 'manual');
+  }
+
+  const rest = [
     relayUrl ? shortRelay(relayUrl) : null,
     `${fps} fps`,
   ]
     .filter(Boolean)
     .join('  ·  ');
+  metaRestEl.textContent = rest ? `·  ${rest}` : '';
 }
 
 function setStatus(data) {
   const state = data.state || 'unknown';
 
-  // Don't overwrite lock / host-priority message in the header
   if (!inputEnabled && (state === 'ready' || state === 'connected')) {
     if (data.pairCode) pairCode = data.pairCode;
     if (data.relayUrl) relayUrl = data.relayUrl;
@@ -93,24 +109,28 @@ function setInputEnabled(enabled, message, reason) {
   viewport.classList.toggle('input-disabled', !inputEnabled);
 
   if (inputEnabled) {
+    controlLabel = '';
+    controlReason = '';
     inputLockEl.hidden = true;
     inputLockEl.classList.remove('host', 'manual');
     statusEl.className = 'status ready';
     statusEl.textContent = 'Live — you have full control';
   } else {
-    const label = message || (
-      reason === 'host' ? 'Host is using this PC' : 'Keyboard and Mouse disabled'
+    controlReason = reason === 'host' ? 'host' : 'manual';
+    controlLabel = message || (
+      controlReason === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled'
     );
     inputLockEl.hidden = false;
-    inputLockEl.classList.toggle('host', reason === 'host');
-    inputLockEl.classList.toggle('manual', reason !== 'host');
-    inputLockEl.textContent = label;
+    inputLockEl.classList.toggle('host', controlReason === 'host');
+    inputLockEl.classList.toggle('manual', controlReason !== 'host');
+    inputLockEl.textContent = controlLabel;
     statusEl.className = 'status waiting';
-    statusEl.textContent = label;
+    statusEl.textContent = controlLabel;
     pressedKeys.clear();
     latestNorm = null;
     cursorEl.style.opacity = '0';
   }
+  updateMeta();
 }
 
 function sendInput(event) {

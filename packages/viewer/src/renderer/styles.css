@@ -71,14 +71,41 @@ body {
 
 .meta {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 45%;
+  max-width: 62%;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.meta-control {
   flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #243044;
+  color: #c5ddf5;
+  border: 1px solid #3d9cf0;
+}
+
+.meta-control.host {
+  background: #2a2418;
+  color: #ffe2a0;
+  border-color: #e6b84d;
+}
+
+.meta-control.manual {
+  background: #1e2a3a;
+  color: #b8d4f0;
+  border-color: #3d9cf0;
 }
 
 .bar-btn {
