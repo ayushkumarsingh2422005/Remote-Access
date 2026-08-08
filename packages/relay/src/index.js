@@ -22,15 +22,22 @@ function peerOf(room, role) {
   return role === Role.HOST ? room.controller : room.host;
 }
 
-function forwardRaw(ws, raw) {
+function forwardRaw(ws, raw, isBinary) {
   const { pairCode, role } = ws.meta || {};
   if (!pairCode || !role) return;
   const room = getRoom(pairCode);
   const other = peerOf(room, role);
-  if (other && other.readyState === 1) {
-    // Keep Buffer as Buffer — never .toString() (breaks binary frames)
-    other.send(raw);
+  if (!other || other.readyState !== 1) return;
+
+  // Preserve WebSocket opcode. `ws` sends Buffers as binary by default; if we
+  // re-send a text JSON payload as binary, the controller treats it as a screen
+  // frame, fails decode, and drops it — so lock/host status never updates.
+  if (isBinary || isBinaryFrame(raw)) {
+    other.send(raw, { binary: true });
+    return;
   }
+  const text = typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf8');
+  other.send(text);
 }
 
 function startRelay(port) {
@@ -47,7 +54,7 @@ function startRelay(port) {
     ws.on('message', (raw, isBinary) => {
       // Binary screen frames — forward without JSON parse
       if (isBinary || isBinaryFrame(raw)) {
-        forwardRaw(ws, raw);
+        forwardRaw(ws, raw, true);
         return;
       }
 
@@ -105,7 +112,7 @@ function startRelay(port) {
       ) {
         return;
       }
-      forwardRaw(ws, raw);
+      forwardRaw(ws, raw, false);
     });
 
     ws.on('close', () => {

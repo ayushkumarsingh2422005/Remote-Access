@@ -318,15 +318,21 @@ function connectRelay() {
   });
 
   ws.on('message', (raw, isBinary) => {
+    // Real screen frames are binary with magic 0x01. Older relays sometimes
+    // re-forward JSON as binary — don't drop those; fall through to JSON parse.
     if (isBinary || isBinaryFrame(raw)) {
-      const frame = decodeFrameBinary(raw);
-      if (!frame || !frame.jpeg || frame.jpeg.length < 2) return;
-      queueFrameToRenderer({
-        width: frame.width,
-        height: frame.height,
-        jpeg: Buffer.from(frame.jpeg),
-      });
-      return;
+      if (isBinaryFrame(raw)) {
+        const frame = decodeFrameBinary(raw);
+        if (frame && frame.jpeg && frame.jpeg.length >= 2) {
+          queueFrameToRenderer({
+            width: frame.width,
+            height: frame.height,
+            jpeg: Buffer.from(frame.jpeg),
+          });
+          return;
+        }
+      }
+      // Not a valid screen frame — try JSON below
     }
 
     const msg = decodeMessage(raw);
