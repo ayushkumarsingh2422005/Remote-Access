@@ -319,6 +319,13 @@ function connectRelay() {
 
     if (msg.type === MessageType.SCREEN_INFO) {
       if (!session.hostPresent) setHostPresent(true);
+      if (typeof msg.remoteInputEnabled === 'boolean') {
+        applyInputState({
+          enabled: msg.remoteInputEnabled,
+          reason: msg.remoteInputReason,
+          message: msg.remoteInputMessage,
+        });
+      }
       sendToRenderer('screen-info', msg);
     }
 

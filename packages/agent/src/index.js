@@ -49,7 +49,11 @@ let manualLock = false; // Ctrl+Alt+L
 let hostBusy = false; // host is using local mouse/keyboard
 let hostIdleTimer = null;
 let suppressHostUntil = 0; // ignore brief inject echoes not marked INJECTED by Windows
-let suppressEchoSkips = 0; // allow real host takeover if activity continues during grace
+let suppressEchoSkips = 0;
+let lastInjectX = -1;
+let lastInjectY = -1;
+let lastInjectAt = 0;
+let moveEchoUntil = 0; // ignore host-activity right after our remote mouse move
 let lastBroadcastEnabled = true;
 let lastBroadcastReason = 'enabled';
 let lastClipboardSent = '';
@@ -182,9 +186,12 @@ async function flushMouseMove() {
   const next = pendingMove;
   pendingMove = null;
   try {
-    // Do NOT call noteRemoteInject here — host hooks ignore mouse-move,
-    // and refreshing grace on every move blocked real host takeover.
     await mouse.setPosition(new Point(next.x, next.y));
+    lastInjectX = next.x;
+    lastInjectY = next.y;
+    lastInjectAt = Date.now();
+    // Brief echo window — remote cursor must not look like host activity
+    moveEchoUntil = lastInjectAt + 90;
   } catch (err) {
     log('move error:', err.message);
   } finally {
@@ -227,14 +234,48 @@ function broadcastInputState(force = false) {
   }
   lastBroadcastEnabled = enabled;
   lastBroadcastReason = reason;
+
+  const payload = { enabled, reason, message };
+  ws.send(encodeMessage(MessageType.INPUT_STATE, payload));
+
+  // Also piggyback on SCREEN_INFO — older relays always forward this type,
+  // so controller still gets lock/host labels even if input_state was dropped.
   ws.send(
-    encodeMessage(MessageType.INPUT_STATE, {
-      enabled,
-      reason,
-      message,
+    encodeMessage(MessageType.SCREEN_INFO, {
+      width: screenMeta.width,
+      height: screenMeta.height,
+      scale: screenMeta.scale,
+      nativeWidth: nativeSize.width,
+      nativeHeight: nativeSize.height,
+      remoteInputEnabled: enabled,
+      remoteInputReason: reason,
+      remoteInputMessage: message,
     })
   );
+
   log(`remote input ${enabled ? 'ENABLED' : 'DISABLED'} (${reason})`);
+
+  // Burst when locking so a busy frame stream can't hide the first packet
+  if (!enabled) {
+    setTimeout(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (isInputEnabled()) return;
+      ws.send(encodeMessage(MessageType.INPUT_STATE, {
+        enabled: false,
+        reason: inputStateReason(),
+        message: inputStateMessage(),
+      }));
+    }, 120);
+    setTimeout(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (isInputEnabled()) return;
+      ws.send(encodeMessage(MessageType.INPUT_STATE, {
+        enabled: false,
+        reason: inputStateReason(),
+        message: inputStateMessage(),
+      }));
+    }, 400);
+  }
 }
 
 function syncInputGate() {
@@ -243,7 +284,7 @@ function syncInputGate() {
     cancelTyping();
     forceReleaseAll().catch((err) => log('forceRelease error:', err.message));
   }
-  broadcastInputState();
+  broadcastInputState(true);
 }
 
 function setManualLock(locked) {
@@ -301,7 +342,7 @@ function isReleaseEvent(event) {
 
 function armHostIdleTimer() {
   if (hostIdleTimer) clearTimeout(hostIdleTimer);
-  const idleMs = Math.max(500, Number(config.hostPriorityMs) || 2000);
+  const idleMs = Math.max(1500, Number(config.hostPriorityMs) || 3500);
   hostIdleTimer = setTimeout(() => {
     hostIdleTimer = null;
     hostBusy = false;
@@ -309,10 +350,44 @@ function armHostIdleTimer() {
   }, idleMs);
 }
 
+function takeHostPriority() {
+  const wasBusy = hostBusy;
+  hostBusy = true;
+  suppressHostUntil = 0;
+  suppressEchoSkips = 0;
+  moveEchoUntil = 0;
+  cancelTyping();
+  pendingMove = null;
+  armHostIdleTimer();
+  if (!wasBusy) {
+    syncInputGate();
+  } else {
+    // Already busy — still refresh idle timer; re-assert label occasionally
+    broadcastInputState(true);
+  }
+}
+
 function onHostPhysicalActivity() {
   const now = Date.now();
-  // First spike during inject grace is likely our own echo. Sustained activity
-  // (2+ events) means the real host is using the PC — let them take over.
+
+  // Echo of our remote mouse-move (Windows sometimes omits INJECTED):
+  // only ignore if cursor is still near the last point we injected.
+  if (now < moveEchoUntil && lastInjectX >= 0) {
+    Promise.resolve()
+      .then(() => mouse.getPosition())
+      .then((pos) => {
+        const x = pos.x ?? pos.getX?.() ?? lastInjectX;
+        const y = pos.y ?? pos.getY?.() ?? lastInjectY;
+        if (Math.abs(x - lastInjectX) <= 8 && Math.abs(y - lastInjectY) <= 8) {
+          return; // our own cursor inject
+        }
+        takeHostPriority();
+      })
+      .catch(() => takeHostPriority());
+    return;
+  }
+
+  // Brief grace after remote click/key inject
   if (now < suppressHostUntil) {
     suppressEchoSkips += 1;
     if (suppressEchoSkips < 2) return;
@@ -320,19 +395,7 @@ function onHostPhysicalActivity() {
     suppressEchoSkips = 0;
   }
 
-  // Host wins — stop treating leftover inject grace as a block
-  suppressHostUntil = 0;
-  suppressEchoSkips = 0;
-
-  const wasBusy = hostBusy;
-  hostBusy = true;
-  // Cancel runaway remote typing immediately when host takes over
-  cancelTyping();
-  armHostIdleTimer();
-
-  if (!wasBusy) {
-    syncInputGate();
-  }
+  takeHostPriority();
 }
 
 function setupHotkeys() {
@@ -420,6 +483,10 @@ async function applyInput(event) {
         if (!isInputEnabled()) return;
         noteRemoteInject();
         await mouse.setPosition(new Point(x, y));
+        lastInjectX = x;
+        lastInjectY = y;
+        lastInjectAt = Date.now();
+        moveEchoUntil = lastInjectAt + 90;
         noteRemoteInject();
         await mouse.pressButton(btn);
         downButtons.add(btn);
@@ -428,6 +495,10 @@ async function applyInput(event) {
         noteRemoteInject();
         try {
           await mouse.setPosition(new Point(x, y));
+          lastInjectX = x;
+          lastInjectY = y;
+          lastInjectAt = Date.now();
+          moveEchoUntil = lastInjectAt + 90;
         } catch {
           /* still try release */
         }

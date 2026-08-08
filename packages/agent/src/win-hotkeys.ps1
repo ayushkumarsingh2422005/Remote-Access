@@ -105,7 +105,8 @@ public static class SsHostWatch {
   public static void EmitActivity() {
     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     lock (gate) {
-      if (now - lastActivityMs < 120) return;
+      // Throttle: mouse-move can be very chatty
+      if (now - lastActivityMs < 80) return;
       lastActivityMs = now;
     }
     Console.WriteLine("HOST_ACTIVITY");
@@ -128,15 +129,15 @@ public static class SsHostWatch {
   public static IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam) {
     if (nCode >= 0) {
       int msg = wParam.ToInt32();
-      // Do NOT treat mouse-move as host activity — remote cursor injection
-      // often looks like a real move and caused a disable/enable feedback loop.
-      // Host takes over with click, wheel, or any key press.
+      MSLLHOOKSTRUCT hs = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+      bool injected = (hs.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) != 0;
+      if (injected) {
+        return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+      }
+      // Real host: click, wheel, OR mouse-move (so host always wins while using the PC)
       if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
-          msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
-        MSLLHOOKSTRUCT hs = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-        if ((hs.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) == 0) {
-          EmitActivity();
-        }
+          msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL || msg == WM_MOUSEMOVE) {
+        EmitActivity();
       }
     }
     return CallNextHookEx(mouseHook, nCode, wParam, lParam);

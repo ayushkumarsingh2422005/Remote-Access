@@ -41,9 +41,9 @@ const DEFAULT_CONFIG = {
   lockInputShortcut: 'Ctrl+Alt+L',
   unlockInputShortcut: 'Ctrl+Alt+U',
   // After host stops using mouse/keyboard, wait this many ms before giving control back
-  hostPriorityMs: 2000,
+  hostPriorityMs: 3500,
   // Ignore brief host-activity echoes after remote click/key inject (not mouse-move)
-  hostInjectGraceMs: 450,
+  hostInjectGraceMs: 400,
 };
 
 function ensureAppDir() {

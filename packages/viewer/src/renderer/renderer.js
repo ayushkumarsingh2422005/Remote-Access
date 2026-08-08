@@ -110,7 +110,7 @@ function applySession(data) {
       (controlReason === 'host'
         ? 'Host is using this PC'
         : 'Keyboard & Mouse disabled');
-  } else {
+  } else if (hasInputFields) {
     controlLabel = '';
     controlReason = '';
   }
@@ -131,8 +131,11 @@ function applySession(data) {
     controlBadgeEl.textContent = controlLabel || 'Locked';
   }
 
-  // Only update connection/status text when main sent an explicit state
-  if (data.state) {
+  // Always reflect lock in the status line (even if data.state omitted)
+  if (!inputEnabled) {
+    statusEl.className = 'status waiting';
+    statusEl.textContent = controlLabel || 'Input disabled';
+  } else if (data.state) {
     const state = data.state;
     statusEl.className = `status ${state === 'locked' ? 'waiting' : state}`;
     statusEl.textContent =
@@ -146,6 +149,14 @@ function applySession(data) {
         disconnected: 'Disconnected',
         error: data.message || 'Error',
       }[state] || state);
+  }
+
+  try {
+    document.title = !inputEnabled
+      ? `SS Remote — ${controlLabel}`
+      : 'SS Remote';
+  } catch {
+    /* ignore */
   }
 
   if (!inputEnabled) {
