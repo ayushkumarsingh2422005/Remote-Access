@@ -101,13 +101,15 @@ function deriveStatusPayload() {
 function pushSession() {
   const status = deriveStatusPayload();
   sendToRenderer('session', status);
-  // Keep legacy channels for compatibility
   sendToRenderer('status', status);
   sendToRenderer('input-state', {
     enabled: session.inputEnabled,
     reason: session.inputReason,
     message: session.inputMessage,
   });
+
+  // Failsafe: paint the lock chip in the DOM directly (beside Type button)
+  paintLockChip(status);
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (!session.inputEnabled && session.hostPresent && session.connection === 'connected') {
@@ -118,6 +120,39 @@ function pushSession() {
       mainWindow.setTitle('SS Remote — Controller');
     }
   }
+}
+
+function paintLockChip(status) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const locked = status && status.inputEnabled === false;
+  const payload = {
+    locked,
+    text: locked
+      ? status.inputMessage ||
+        status.message ||
+        (status.inputReason === 'host'
+          ? 'Host is using this PC'
+          : 'Keyboard & Mouse disabled')
+      : '',
+    reason: locked && status.inputReason === 'host' ? 'host' : 'manual',
+  };
+  const js = `(() => {
+    const p = ${JSON.stringify(payload)};
+    const el = document.getElementById('lock-chip');
+    if (!el) return;
+    if (p.locked) {
+      el.textContent = p.text;
+      el.className = 'lock-chip is-on ' + p.reason;
+      el.style.display = 'inline-flex';
+      const st = document.getElementById('status');
+      if (st) { st.textContent = p.text; st.className = 'status waiting'; }
+    } else {
+      el.textContent = '';
+      el.className = 'lock-chip';
+      el.style.display = 'none';
+    }
+  })();`;
+  mainWindow.webContents.executeJavaScript(js, true).catch(() => {});
 }
 
 function setConnection(connection, errorMessage = '') {

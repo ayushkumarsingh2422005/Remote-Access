@@ -9,20 +9,16 @@
 <body>
   <header class="bar">
     <div class="brand">SS Remote</div>
-    <div id="control-badge" class="control-badge" hidden>Locked</div>
     <div id="status" class="status">Connecting…</div>
     <button type="button" id="btn-type" class="bar-btn" title="Type text on the remote PC">
       Type
     </button>
+    <div id="lock-chip" class="lock-chip" style="display:none" aria-live="polite"></div>
     <div id="meta" class="meta">
       <span id="meta-pair"></span>
-      <span id="meta-control" class="meta-control" hidden></span>
       <span id="meta-rest"></span>
     </div>
   </header>
-  <div id="input-lock" class="input-lock" hidden>
-    Keyboard and Mouse disabled
-  </div>
   <main class="stage">
     <div id="placeholder" class="placeholder">
       <p>Waiting for the host to share its screen.</p>

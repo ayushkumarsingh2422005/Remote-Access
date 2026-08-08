@@ -3,12 +3,11 @@ const ctx = canvas.getContext('2d', { alpha: false });
 const placeholder = document.getElementById('placeholder');
 const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
-const inputLockEl = document.getElementById('input-lock');
-const controlBadgeEl = document.getElementById('control-badge');
+const lockChipEl = document.getElementById('lock-chip');
 const statusEl = document.getElementById('status');
 const metaPairEl = document.getElementById('meta-pair');
-const metaControlEl = document.getElementById('meta-control');
 const metaRestEl = document.getElementById('meta-rest');
+const btnType = document.getElementById('btn-type');
 
 let frameW = 0;
 let frameH = 0;
@@ -38,31 +37,10 @@ function shortRelay(url) {
   }
 }
 
-function showEl(el, visible) {
-  if (!el) return;
-  if (visible) el.removeAttribute('hidden');
-  else el.setAttribute('hidden', '');
-}
-
 function updateMeta() {
   if (metaPairEl) {
     metaPairEl.textContent = pairCode ? `pair: ${pairCode}` : '';
   }
-
-  const locked = !inputEnabled && !!controlLabel;
-  if (metaControlEl) {
-    if (locked) {
-      metaControlEl.textContent = controlLabel;
-      metaControlEl.classList.toggle('host', controlReason === 'host');
-      metaControlEl.classList.toggle('manual', controlReason !== 'host');
-      showEl(metaControlEl, true);
-    } else {
-      metaControlEl.textContent = '';
-      metaControlEl.classList.remove('host', 'manual');
-      showEl(metaControlEl, false);
-    }
-  }
-
   if (metaRestEl) {
     const rest = [
       relayUrl ? shortRelay(relayUrl) : null,
@@ -74,9 +52,22 @@ function updateMeta() {
   }
 }
 
+/** Paint lock chip beside the Type button — always use inline display. */
+function paintLockChip(locked, label, reason) {
+  if (!lockChipEl) return;
+  if (locked) {
+    lockChipEl.textContent = label || 'Input disabled';
+    lockChipEl.className = `lock-chip is-on ${reason === 'host' ? 'host' : 'manual'}`;
+    lockChipEl.style.display = 'inline-flex';
+  } else {
+    lockChipEl.textContent = '';
+    lockChipEl.className = 'lock-chip';
+    lockChipEl.style.display = 'none';
+  }
+}
+
 /**
  * Apply authoritative session from main process.
- * Main owns connection + lock state; renderer only paints it.
  */
 function applySession(data) {
   if (!data || typeof data !== 'object') return;
@@ -116,22 +107,8 @@ function applySession(data) {
   }
 
   if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
+  paintLockChip(!inputEnabled, controlLabel, controlReason);
 
-  showEl(inputLockEl, !inputEnabled);
-  if (inputLockEl) {
-    inputLockEl.classList.toggle('host', controlReason === 'host');
-    inputLockEl.classList.toggle('manual', !inputEnabled && controlReason !== 'host');
-    inputLockEl.textContent = controlLabel || 'Keyboard & Mouse disabled';
-  }
-
-  showEl(controlBadgeEl, !inputEnabled);
-  if (controlBadgeEl) {
-    controlBadgeEl.classList.toggle('host', controlReason === 'host');
-    controlBadgeEl.classList.toggle('manual', !inputEnabled && controlReason !== 'host');
-    controlBadgeEl.textContent = controlLabel || 'Locked';
-  }
-
-  // Always reflect lock in the status line (even if data.state omitted)
   if (!inputEnabled) {
     statusEl.className = 'status waiting';
     statusEl.textContent = controlLabel || 'Input disabled';
@@ -149,14 +126,6 @@ function applySession(data) {
         disconnected: 'Disconnected',
         error: data.message || 'Error',
       }[state] || state);
-  }
-
-  try {
-    document.title = !inputEnabled
-      ? `SS Remote — ${controlLabel}`
-      : 'SS Remote';
-  } catch {
-    /* ignore */
   }
 
   if (!inputEnabled) {
@@ -206,7 +175,6 @@ function mapCoords(clientX, clientY) {
 }
 
 function sendInput(event) {
-  // Allow key/mouse releases even when locked so the host doesn't keep stuck modifiers
   const isRelease = event && (event.action === 'keyup' || event.action === 'mouseup');
   if (!inputEnabled && !isRelease) return;
   window.ssRemote.sendInput(event);
@@ -217,7 +185,6 @@ function releaseAllLocalKeys() {
     window.ssRemote.sendInput({ action: 'keyup', key: code, code });
   }
   pressedKeys.clear();
-  // Also release primary mouse buttons in case a drag was mid-flight
   window.ssRemote.sendInput({ action: 'mouseup', button: 0, nx: 0.5, ny: 0.5 });
   window.ssRemote.sendInput({ action: 'mouseup', button: 2, nx: 0.5, ny: 0.5 });
 }
@@ -494,7 +461,6 @@ const typeSpeed = document.getElementById('type-speed');
 const typeSend = document.getElementById('type-send');
 const typeStatus = document.getElementById('type-status');
 const typeClose = document.getElementById('type-close');
-const btnType = document.getElementById('btn-type');
 
 function openTypeModal() {
   typeModal.hidden = false;
