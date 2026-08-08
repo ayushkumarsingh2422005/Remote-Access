@@ -10,6 +10,9 @@
   <header class="bar">
     <div class="brand">SS Remote</div>
     <div id="status" class="status">Connecting…</div>
+    <button type="button" id="btn-type" class="bar-btn" title="Type text on the remote PC">
+      Type
+    </button>
     <div id="meta" class="meta"></div>
   </header>
   <main class="stage">
@@ -25,6 +28,37 @@
       </div>
     </div>
   </main>
+
+  <div id="type-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-panel" role="dialog" aria-labelledby="type-title">
+      <div class="modal-head">
+        <h2 id="type-title">Mimic typing</h2>
+        <button type="button" class="icon-btn" id="type-close" aria-label="Close">×</button>
+      </div>
+      <p class="modal-hint">
+        Click where you want text on the remote screen first, then send.
+        Keystrokes are typed at the host caret — as if someone were typing.
+      </p>
+      <textarea
+        id="type-text"
+        class="type-area"
+        placeholder="Type or paste text to send to the host…"
+        spellcheck="false"
+      ></textarea>
+      <div class="modal-row">
+        <label class="speed-label" for="type-speed">Speed</label>
+        <select id="type-speed" class="speed-select">
+          <option value="8">Fast</option>
+          <option value="25" selected>Natural</option>
+          <option value="55">Slow</option>
+        </select>
+        <span id="type-status" class="type-status"></span>
+        <button type="button" id="type-send" class="primary-btn">Send to host</button>
+      </div>
+    </div>
+  </div>
+
   <script src="renderer.js"></script>
 </body>
 </html>

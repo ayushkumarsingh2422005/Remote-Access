@@ -204,6 +204,8 @@ ss connect wss://some-name.loca.lt
 
 That saves the public URL and opens the viewer. Click the remote screen to focus it, then use mouse and keyboard normally.
 
+**Mimic typing:** In the viewer header click **Type**, paste/write text in the dialog, choose speed, then **Send to host**. First click the place on the remote screen where the caret should be. Text is typed as real keystrokes (same idea as AutoTyper) over the existing connection — no extra tunnel.
+
 If you prefer manual steps:
 
 ```bash

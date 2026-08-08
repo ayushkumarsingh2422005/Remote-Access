@@ -325,3 +325,74 @@ window.ssRemote.getConfig().then((cfg) => {
   relayUrl = cfg.relayUrl || '';
   updateMeta();
 });
+
+/* —— Mimic typing dialog —— */
+const typeModal = document.getElementById('type-modal');
+const typeText = document.getElementById('type-text');
+const typeSpeed = document.getElementById('type-speed');
+const typeSend = document.getElementById('type-send');
+const typeStatus = document.getElementById('type-status');
+const typeClose = document.getElementById('type-close');
+const btnType = document.getElementById('btn-type');
+
+function openTypeModal() {
+  typeModal.hidden = false;
+  typeStatus.textContent = '';
+  typeStatus.className = 'type-status';
+  setTimeout(() => typeText.focus(), 50);
+}
+
+function closeTypeModal() {
+  typeModal.hidden = true;
+  if (!viewport.hidden) canvas.focus();
+}
+
+btnType.addEventListener('click', () => {
+  if (!inputEnabled) {
+    typeStatus.textContent = 'Input is disabled on the host right now.';
+    openTypeModal();
+    typeStatus.className = 'type-status warn';
+    return;
+  }
+  openTypeModal();
+});
+
+typeClose.addEventListener('click', closeTypeModal);
+typeModal.querySelector('.modal-backdrop').addEventListener('click', closeTypeModal);
+
+window.addEventListener('keydown', (e) => {
+  if (typeModal.hidden) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeTypeModal();
+  }
+});
+
+typeSend.addEventListener('click', () => {
+  const text = typeText.value;
+  if (!text) {
+    typeStatus.textContent = 'Add some text first.';
+    typeStatus.className = 'type-status warn';
+    return;
+  }
+  if (!inputEnabled) {
+    typeStatus.textContent = 'Host has blocked remote input.';
+    typeStatus.className = 'type-status warn';
+    return;
+  }
+
+  const delayMs = Number(typeSpeed.value) || 25;
+  const maxChars = 100000;
+  const payload = text.length > maxChars ? text.slice(0, maxChars) : text;
+
+  sendInput({
+    action: 'type-text',
+    text: payload,
+    delayMs,
+    tabWidth: 4,
+  });
+
+  typeStatus.textContent = `Sent ${payload.length} characters — typing on host…`;
+  typeStatus.className = 'type-status ok';
+  typeText.value = '';
+});

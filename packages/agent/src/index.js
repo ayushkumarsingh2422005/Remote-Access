@@ -20,6 +20,7 @@ const {
 } = require('@ss-remote/shared');
 const fs = require('fs');
 const { startHostHotkeys } = require('./hotkeys');
+const { typeMimic } = require('./type-text');
 
 mouse.config.autoDelayMs = 0;
 keyboard.config.autoDelayMs = 0;
@@ -302,10 +303,33 @@ function setupHotkeys() {
   }
 }
 
+let typingBusy = false;
+
 async function applyInput(event) {
   if (!isInputEnabled()) return;
   noteRemoteInject();
   try {
+    if (event.action === 'type-text') {
+      if (typingBusy) return;
+      typingBusy = true;
+      try {
+        const raw = String(event.text || '');
+        const text = raw.length > 100000 ? raw.slice(0, 100000) : raw;
+        const delayMs = Math.max(0, Math.min(200, Number(event.delayMs) || 25));
+        const approxMs = Math.max(1000, text.length * (delayMs + 10));
+        suppressHostUntil = Date.now() + approxMs + 800;
+        await typeMimic(
+          text,
+          { delayMs, tabWidth: event.tabWidth || 4 },
+          log
+        );
+        noteRemoteInject();
+      } finally {
+        typingBusy = false;
+      }
+      return;
+    }
+
     if (event.action === 'mousemove') {
       pendingMove = toNativeCoords(event);
       flushMouseMove().catch(() => {});
