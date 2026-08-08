@@ -60,6 +60,8 @@ function paintStatusChip(mode, text) {
   lockChipEl.style.display = 'inline-flex';
 }
 
+let lastChipSeq = 0;
+
 function applySession(data) {
   if (!data || typeof data !== 'object') return;
 
@@ -100,22 +102,7 @@ function applySession(data) {
 
   if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
 
-  if (!inputEnabled) {
-    paintStatusChip(
-      controlReason === 'host' ? 'host' : 'manual',
-      controlLabel || 'Input disabled'
-    );
-  } else if (data.state === 'ready' || (data.hostPresent && inputEnabled && lastSessionState === 'ready')) {
-    paintStatusChip('live', 'Live — full control');
-  } else if (data.state === 'error' || data.state === 'disconnected') {
-    paintStatusChip('error', data.message || data.state);
-  } else if (data.state === 'connecting' || data.state === 'connected' || data.state === 'waiting') {
-    paintStatusChip('wait', data.message || 'Waiting for host…');
-  } else if (data.hostPresent && inputEnabled) {
-    paintStatusChip('live', 'Live — full control');
-  } else if (data.message) {
-    paintStatusChip('wait', data.message);
-  }
+  // Chip text is owned by the control-chip IPC from main — do not paint Live here
 
   if (!inputEnabled) {
     if (pressedKeys.size > 0) releaseAllLocalKeys();
@@ -403,11 +390,9 @@ if (typeof window.ssRemote.onSession === 'function') {
   window.ssRemote.onSession(applySession);
 }
 
-// input-state is also embedded in session/status from main; keep as fallback only
 window.ssRemote.onInputState((data) => {
   const on = data.enabled !== false && data.enabled !== 'false';
   applySession({
-    // Do not invent connection state — only paint lock chrome
     inputEnabled: on,
     inputReason: data.reason,
     inputMessage: data.message,
@@ -417,6 +402,16 @@ window.ssRemote.onInputState((data) => {
     relayUrl,
   });
 });
+
+// Only this channel updates the chip beside Type (avoids Live overwriting lock)
+if (typeof window.ssRemote.onControlChip === 'function') {
+  window.ssRemote.onControlChip((data) => {
+    if (!data || typeof data.seq !== 'number') return;
+    if (data.seq < lastChipSeq) return;
+    lastChipSeq = data.seq;
+    paintStatusChip(data.mode, data.text);
+  });
+}
 
 if (typeof window.ssRemote.getSession === 'function') {
   window.ssRemote.getSession().then((data) => {

@@ -56,6 +56,9 @@ let lastInjectAt = 0;
 let moveEchoUntil = 0; // ignore host-activity right after our remote mouse move
 let lastBroadcastEnabled = true;
 let lastBroadcastReason = 'enabled';
+let lastBroadcastAt = 0;
+let lockBurstTimer1 = null;
+let lockBurstTimer2 = null;
 let lastClipboardSent = '';
 let lastClipboardApplied = '';
 let applyingClipboard = false;
@@ -225,21 +228,24 @@ function broadcastInputState(force = false) {
   const enabled = isInputEnabled();
   const reason = inputStateReason();
   const message = inputStateMessage();
-  if (
-    !force &&
-    enabled === lastBroadcastEnabled &&
-    reason === lastBroadcastReason
-  ) {
-    return;
+  const same =
+    enabled === lastBroadcastEnabled && reason === lastBroadcastReason;
+  const now = Date.now();
+
+  // Skip unchanged state (force is only for rare re-sync, and rate-limited)
+  if (same) {
+    if (!force) return;
+    if (now - lastBroadcastAt < 2000) return;
   }
+
   lastBroadcastEnabled = enabled;
   lastBroadcastReason = reason;
+  lastBroadcastAt = now;
 
   const payload = { enabled, reason, message };
   ws.send(encodeMessage(MessageType.INPUT_STATE, payload));
 
-  // Also piggyback on SCREEN_INFO — older relays always forward this type,
-  // so controller still gets lock/host labels even if input_state was dropped.
+  // Piggyback on SCREEN_INFO for older relays that drop input_state
   ws.send(
     encodeMessage(MessageType.SCREEN_INFO, {
       width: screenMeta.width,
@@ -255,26 +261,32 @@ function broadcastInputState(force = false) {
 
   log(`remote input ${enabled ? 'ENABLED' : 'DISABLED'} (${reason})`);
 
-  // Burst when locking so a busy frame stream can't hide the first packet
-  if (!enabled) {
-    setTimeout(() => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (isInputEnabled()) return;
-      ws.send(encodeMessage(MessageType.INPUT_STATE, {
-        enabled: false,
-        reason: inputStateReason(),
-        message: inputStateMessage(),
-      }));
-    }, 120);
-    setTimeout(() => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (isInputEnabled()) return;
-      ws.send(encodeMessage(MessageType.INPUT_STATE, {
-        enabled: false,
-        reason: inputStateReason(),
-        message: inputStateMessage(),
-      }));
-    }, 400);
+  // One short follow-up when entering a locked state (not on every mouse move)
+  if (!enabled && !same) {
+    if (lockBurstTimer1) clearTimeout(lockBurstTimer1);
+    if (lockBurstTimer2) clearTimeout(lockBurstTimer2);
+    lockBurstTimer1 = setTimeout(() => {
+      lockBurstTimer1 = null;
+      if (!ws || ws.readyState !== WebSocket.OPEN || isInputEnabled()) return;
+      ws.send(
+        encodeMessage(MessageType.INPUT_STATE, {
+          enabled: false,
+          reason: inputStateReason(),
+          message: inputStateMessage(),
+        })
+      );
+    }, 150);
+    lockBurstTimer2 = setTimeout(() => {
+      lockBurstTimer2 = null;
+      if (!ws || ws.readyState !== WebSocket.OPEN || isInputEnabled()) return;
+      ws.send(
+        encodeMessage(MessageType.INPUT_STATE, {
+          enabled: false,
+          reason: inputStateReason(),
+          message: inputStateMessage(),
+        })
+      );
+    }, 500);
   }
 }
 
@@ -284,11 +296,25 @@ function syncInputGate() {
     cancelTyping();
     forceReleaseAll().catch((err) => log('forceRelease error:', err.message));
   }
-  broadcastInputState(true);
+  // Only send when enabled/reason actually changed
+  broadcastInputState(false);
 }
 
 function setManualLock(locked) {
   manualLock = !!locked;
+  if (!locked) {
+    // Explicit unlock must fully restore control — unlock chord often
+    // also trips hostBusy via the keyboard hook.
+    hostBusy = false;
+    if (hostIdleTimer) {
+      clearTimeout(hostIdleTimer);
+      hostIdleTimer = null;
+    }
+    suppressHostUntil = 0;
+    suppressEchoSkips = 0;
+    moveEchoUntil = 0;
+  }
+  log(manualLock ? 'manual LOCK (Ctrl+Alt+L)' : 'manual UNLOCK (Ctrl+Alt+U)');
   syncInputGate();
 }
 
@@ -359,11 +385,9 @@ function takeHostPriority() {
   cancelTyping();
   pendingMove = null;
   armHostIdleTimer();
+  // Only notify controller when we *enter* host-busy — never on every mouse move
   if (!wasBusy) {
     syncInputGate();
-  } else {
-    // Already busy — still refresh idle timer; re-assert label occasionally
-    broadcastInputState(true);
   }
 }
 
@@ -780,6 +804,7 @@ function connect() {
       log('controller connected — sharing screen');
       controllerConnected = true;
       startCaptureLoop();
+      lastBroadcastAt = 0; // always tell the new controller the current lock state
       broadcastInputState(true);
       return;
     }

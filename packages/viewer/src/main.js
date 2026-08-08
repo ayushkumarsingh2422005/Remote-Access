@@ -42,6 +42,7 @@ function deriveStatusPayload() {
   const base = {
     pairCode: session.pairCode,
     relayUrl: session.relayUrl,
+    connection: session.connection,
     hostPresent: session.hostPresent,
     inputEnabled: session.inputEnabled,
     inputReason: session.inputReason,
@@ -70,15 +71,7 @@ function deriveStatusPayload() {
     };
   }
 
-  // Connected to relay
-  if (!session.hostPresent) {
-    return {
-      ...base,
-      state: 'connected',
-      message: 'Connected — waiting for host…',
-    };
-  }
-
+  // Lock / host-priority always wins over "waiting for host" / live
   if (!session.inputEnabled) {
     return {
       ...base,
@@ -91,12 +84,22 @@ function deriveStatusPayload() {
     };
   }
 
+  if (!session.hostPresent) {
+    return {
+      ...base,
+      state: 'connected',
+      message: 'Connected — waiting for host…',
+    };
+  }
+
   return {
     ...base,
     state: 'ready',
     message: 'Live — you have full control',
   };
 }
+
+let chipSeq = 0;
 
 function pushSession() {
   const status = deriveStatusPayload();
@@ -108,11 +111,11 @@ function pushSession() {
     message: session.inputMessage,
   });
 
-  // Failsafe: paint the lock chip in the DOM directly (beside Type button)
-  paintLockChip(status);
+  // Sole owner of the Type-button chip — renderer must not invent this
+  paintControlChip(status);
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (!session.inputEnabled && session.hostPresent && session.connection === 'connected') {
+    if (!session.inputEnabled && session.connection === 'connected') {
       mainWindow.setTitle(`SS Remote — ${status.message}`);
     } else if (session.hostPresent && session.connection === 'connected') {
       mainWindow.setTitle('SS Remote — Live');
@@ -122,8 +125,9 @@ function pushSession() {
   }
 }
 
-function paintLockChip(status) {
-  if (!mainWindow || mainWindow.isDestroyed() || !status) return;
+function paintControlChip(status) {
+  if (!status) return;
+  const seq = ++chipSeq;
 
   let mode = 'wait';
   let text = status.message || 'Connecting…';
@@ -131,30 +135,25 @@ function paintLockChip(status) {
   if (status.state === 'error' || status.state === 'disconnected') {
     mode = 'error';
     text = status.message || status.state;
-  } else if (status.inputEnabled === false) {
+  } else if (status.inputEnabled === false || status.state === 'locked') {
     mode = status.inputReason === 'host' ? 'host' : 'manual';
     text =
       status.inputMessage ||
       status.message ||
       (mode === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled');
-  } else if (status.state === 'ready' || (status.hostPresent && status.connection === 'connected')) {
+  } else if (status.state === 'ready') {
     mode = 'live';
     text = 'Live — full control';
-  } else if (status.state === 'connected' || status.state === 'waiting' || status.state === 'connecting') {
+  } else if (
+    status.state === 'connected' ||
+    status.state === 'waiting' ||
+    status.state === 'connecting'
+  ) {
     mode = 'wait';
     text = status.message || 'Waiting for host…';
   }
 
-  const payload = { mode, text };
-  const js = `(() => {
-    const p = ${JSON.stringify(payload)};
-    const el = document.getElementById('lock-chip');
-    if (!el) return;
-    el.textContent = p.text;
-    el.className = 'lock-chip ' + p.mode;
-    el.style.display = 'inline-flex';
-  })();`;
-  mainWindow.webContents.executeJavaScript(js, true).catch(() => {});
+  sendToRenderer('control-chip', { seq, mode, text });
 }
 
 function setConnection(connection, errorMessage = '') {
@@ -355,14 +354,24 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.SCREEN_INFO) {
-      if (!session.hostPresent) setHostPresent(true);
+      // Apply lock fields first, then mark host present — one pushSession only
       if (typeof msg.remoteInputEnabled === 'boolean') {
-        applyInputState({
-          enabled: msg.remoteInputEnabled,
-          reason: msg.remoteInputReason,
-          message: msg.remoteInputMessage,
-        });
+        session.inputEnabled = msg.remoteInputEnabled;
+        session.inputReason =
+          msg.remoteInputReason ||
+          (msg.remoteInputEnabled ? 'enabled' : 'manual');
+        session.inputMessage =
+          msg.remoteInputMessage ||
+          (msg.remoteInputEnabled
+            ? 'Keyboard and Mouse enabled'
+            : session.inputReason === 'host'
+              ? 'Host is using this PC'
+              : 'Keyboard and Mouse disabled');
       }
+      if (!session.hostPresent) {
+        session.hostPresent = true;
+      }
+      pushSession();
       sendToRenderer('screen-info', msg);
     }
 

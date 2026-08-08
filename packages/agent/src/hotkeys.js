@@ -129,10 +129,12 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
     if (msg === 'LOCK') {
       if (now - lastLockFire < 350) return;
       lastLockFire = now;
+      if (log) log('hotkey: LOCK');
       onLock();
     } else if (msg === 'UNLOCK') {
       if (now - lastUnlockFire < 350) return;
       lastUnlockFire = now;
+      if (log) log('hotkey: UNLOCK');
       onUnlock();
     } else if (msg.startsWith('ERR:') && log) {
       log('hotkeys:', msg.slice(4).trim());

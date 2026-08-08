@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('ssRemote', {
     ipcRenderer.on('session', handler);
     return () => ipcRenderer.removeListener('session', handler);
   },
+  onControlChip: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('control-chip', handler);
+    return () => ipcRenderer.removeListener('control-chip', handler);
+  },
   getInputState: () => ipcRenderer.invoke('get-input-state'),
   getSession: () => ipcRenderer.invoke('get-session'),
   sendInput: (event) => ipcRenderer.send('input', event),

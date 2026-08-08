@@ -13,7 +13,6 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Threading;
 
 public struct MSG {
   public IntPtr hwnd;
@@ -65,6 +64,11 @@ public static class SsHostWatch {
   public const uint LLKHF_LOWER_IL_INJECTED = 0x02;
   public const uint LLMHF_INJECTED = 0x01;
   public const uint LLMHF_LOWER_IL_INJECTED = 0x02;
+  public const int VK_CONTROL = 0x11;
+  public const int VK_MENU = 0x12; // Alt
+  public const int VK_SHIFT = 0x10;
+  public const int VK_LWIN = 0x5B;
+  public const int VK_RWIN = 0x5C;
 
   public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -95,22 +99,61 @@ public static class SsHostWatch {
   [DllImport("kernel32.dll")]
   public static extern IntPtr GetModuleHandle(string lpModuleName);
 
+  [DllImport("user32.dll")]
+  public static extern short GetAsyncKeyState(int vKey);
+
   public static IntPtr keyboardHook = IntPtr.Zero;
   public static IntPtr mouseHook = IntPtr.Zero;
   public static HookProc kbProc;
   public static HookProc msProc;
   public static long lastActivityMs = 0;
+  public static long lastHotkeyMs = 0;
   public static readonly object gate = new object();
+
+  public static uint lockVk = 0;
+  public static uint unlockVk = 0;
+  public static bool lockNeedCtrl = true;
+  public static bool lockNeedAlt = true;
+  public static bool lockNeedShift = false;
+  public static bool lockNeedWin = false;
+  public static bool unlockNeedCtrl = true;
+  public static bool unlockNeedAlt = true;
+  public static bool unlockNeedShift = false;
+  public static bool unlockNeedWin = false;
+
+  public static void Emit(string line) {
+    Console.WriteLine(line);
+    Console.Out.Flush();
+  }
 
   public static void EmitActivity() {
     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     lock (gate) {
-      // Throttle: mouse-move can be very chatty
       if (now - lastActivityMs < 80) return;
       lastActivityMs = now;
     }
-    Console.WriteLine("HOST_ACTIVITY");
-    Console.Out.Flush();
+    Emit("HOST_ACTIVITY");
+  }
+
+  public static void EmitHotkey(string kind) {
+    long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    lock (gate) {
+      if (now - lastHotkeyMs < 400) return;
+      lastHotkeyMs = now;
+    }
+    Emit(kind);
+  }
+
+  static bool Down(int vk) {
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+  }
+
+  static bool ModsMatch(bool needCtrl, bool needAlt, bool needShift, bool needWin) {
+    bool ctrl = Down(VK_CONTROL);
+    bool alt = Down(VK_MENU);
+    bool shift = Down(VK_SHIFT);
+    bool win = Down(VK_LWIN) || Down(VK_RWIN);
+    return ctrl == needCtrl && alt == needAlt && shift == needShift && win == needWin;
   }
 
   public static IntPtr KeyboardCallback(int nCode, IntPtr wParam, IntPtr lParam) {
@@ -118,8 +161,19 @@ public static class SsHostWatch {
       int msg = wParam.ToInt32();
       if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         KBDLLHOOKSTRUCT hs = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-        if ((hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) == 0) {
-          EmitActivity();
+        bool injected = (hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0;
+        if (!injected) {
+          // Fallback hotkeys via LL hook — more reliable than RegisterHotKey alone
+          if (hs.vkCode == unlockVk &&
+              ModsMatch(unlockNeedCtrl, unlockNeedAlt, unlockNeedShift, unlockNeedWin)) {
+            EmitHotkey("UNLOCK");
+            // Do not treat unlock chord as "host using PC"
+          } else if (hs.vkCode == lockVk &&
+              ModsMatch(lockNeedCtrl, lockNeedAlt, lockNeedShift, lockNeedWin)) {
+            EmitHotkey("LOCK");
+          } else {
+            EmitActivity();
+          }
         }
       }
     }
@@ -131,13 +185,11 @@ public static class SsHostWatch {
       int msg = wParam.ToInt32();
       MSLLHOOKSTRUCT hs = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
       bool injected = (hs.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) != 0;
-      if (injected) {
-        return CallNextHookEx(mouseHook, nCode, wParam, lParam);
-      }
-      // Real host: click, wheel, OR mouse-move (so host always wins while using the PC)
-      if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
-          msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL || msg == WM_MOUSEMOVE) {
-        EmitActivity();
+      if (!injected) {
+        if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
+            msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL || msg == WM_MOUSEMOVE) {
+          EmitActivity();
+        }
       }
     }
     return CallNextHookEx(mouseHook, nCode, wParam, lParam);
@@ -166,25 +218,41 @@ public static class SsHostWatch {
 }
 "@
 
+function Test-ModFlag([int]$mods, [int]$flag) {
+  return ($mods -band $flag) -ne 0
+}
+
+# Configure chord detection for LL-hook fallback
+[SsHostWatch]::lockVk = [uint32]$LockVk
+[SsHostWatch]::unlockVk = [uint32]$UnlockVk
+[SsHostWatch]::lockNeedAlt = Test-ModFlag $LockMods 0x0001
+[SsHostWatch]::lockNeedCtrl = Test-ModFlag $LockMods 0x0002
+[SsHostWatch]::lockNeedShift = Test-ModFlag $LockMods 0x0004
+[SsHostWatch]::lockNeedWin = Test-ModFlag $LockMods 0x0008
+[SsHostWatch]::unlockNeedAlt = Test-ModFlag $UnlockMods 0x0001
+[SsHostWatch]::unlockNeedCtrl = Test-ModFlag $UnlockMods 0x0002
+[SsHostWatch]::unlockNeedShift = Test-ModFlag $UnlockMods 0x0004
+[SsHostWatch]::unlockNeedWin = Test-ModFlag $UnlockMods 0x0008
+
 $lockId = 1
 $unlockId = 2
 
-if (-not [SsHostWatch]::RegisterHotKey([IntPtr]::Zero, $lockId, [uint32]$LockMods, [uint32]$LockVk)) {
-  Write-Output "ERR: failed to register lock hotkey (maybe already in use)"
-  exit 1
+$lockOk = [SsHostWatch]::RegisterHotKey([IntPtr]::Zero, $lockId, [uint32]$LockMods, [uint32]$LockVk)
+$unlockOk = [SsHostWatch]::RegisterHotKey([IntPtr]::Zero, $unlockId, [uint32]$UnlockMods, [uint32]$UnlockVk)
+
+if (-not $lockOk) {
+  Write-Output "ERR: failed to register lock hotkey (LL-hook fallback still active)"
 }
-if (-not [SsHostWatch]::RegisterHotKey([IntPtr]::Zero, $unlockId, [uint32]$UnlockMods, [uint32]$UnlockVk)) {
-  [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $lockId)
-  Write-Output "ERR: failed to register unlock hotkey (maybe already in use)"
-  exit 1
+if (-not $unlockOk) {
+  Write-Output "ERR: failed to register unlock hotkey (LL-hook fallback still active)"
 }
 
 try {
   [SsHostWatch]::InstallHooks()
 }
 catch {
-  [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $lockId)
-  [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $unlockId)
+  if ($lockOk) { [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $lockId) }
+  if ($unlockOk) { [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $unlockId) }
   Write-Output ("ERR: " + $_.Exception.Message)
   exit 1
 }
@@ -196,13 +264,14 @@ try {
   $msg = New-Object MSG
   while ([SsHostWatch]::GetMessage([ref]$msg, [IntPtr]::Zero, 0, 0)) {
     if ($msg.message -eq [SsHostWatch]::WM_HOTKEY) {
-      if ($msg.wParam.ToUInt32() -eq $lockId) {
-        Write-Output "LOCK"
-        [Console]::Out.Flush()
+      # Robust id compare (UIntPtr / IntPtr quirks across runtimes)
+      $id = 0
+      try { $id = [int64]$msg.wParam.ToUInt64() } catch { $id = [int64]$msg.wParam }
+      if ($id -eq $lockId) {
+        [SsHostWatch]::EmitHotkey("LOCK")
       }
-      elseif ($msg.wParam.ToUInt32() -eq $unlockId) {
-        Write-Output "UNLOCK"
-        [Console]::Out.Flush()
+      elseif ($id -eq $unlockId) {
+        [SsHostWatch]::EmitHotkey("UNLOCK")
       }
     }
     [void][SsHostWatch]::TranslateMessage([ref]$msg)
@@ -211,6 +280,6 @@ try {
 }
 finally {
   [SsHostWatch]::RemoveHooks()
-  [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $lockId)
-  [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $unlockId)
+  if ($lockOk) { [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $lockId) }
+  if ($unlockOk) { [void][SsHostWatch]::UnregisterHotKey([IntPtr]::Zero, $unlockId) }
 }
