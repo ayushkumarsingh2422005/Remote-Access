@@ -73,16 +73,47 @@ function saveConfig(partial) {
   return next;
 }
 
+/** Binary screen frame: magic(1) + width(u16 BE) + height(u16 BE) + jpeg bytes */
+const FRAME_BIN_MAGIC = 0x01;
+
 function encodeMessage(type, payload = {}) {
   return JSON.stringify({ type, ...payload, t: Date.now() });
 }
 
 function decodeMessage(data) {
   try {
+    if (Buffer.isBuffer(data) && data.length > 0 && data[0] === FRAME_BIN_MAGIC) {
+      return null; // binary frame — use decodeFrameBinary
+    }
     return JSON.parse(typeof data === 'string' ? data : data.toString());
   } catch {
     return null;
   }
+}
+
+function isBinaryFrame(data) {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  return buf.length >= 5 && buf[0] === FRAME_BIN_MAGIC;
+}
+
+function encodeFrameBinary(width, height, jpegBuffer) {
+  const w = Math.max(0, Math.min(65535, width | 0));
+  const h = Math.max(0, Math.min(65535, height | 0));
+  const header = Buffer.allocUnsafe(5);
+  header[0] = FRAME_BIN_MAGIC;
+  header.writeUInt16BE(w, 1);
+  header.writeUInt16BE(h, 3);
+  return Buffer.concat([header, jpegBuffer]);
+}
+
+function decodeFrameBinary(data) {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  if (buf.length < 5 || buf[0] !== FRAME_BIN_MAGIC) return null;
+  return {
+    width: buf.readUInt16BE(1),
+    height: buf.readUInt16BE(3),
+    jpeg: buf.subarray(5),
+  };
 }
 
 module.exports = {
@@ -96,9 +127,13 @@ module.exports = {
   MessageType,
   Role,
   DEFAULT_CONFIG,
+  FRAME_BIN_MAGIC,
   ensureAppDir,
   loadConfig,
   saveConfig,
   encodeMessage,
   decodeMessage,
+  isBinaryFrame,
+  encodeFrameBinary,
+  decodeFrameBinary,
 };

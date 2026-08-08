@@ -154,8 +154,25 @@ function base64ToUint8Array(b64) {
   return bytes;
 }
 
+function toJpegBytes(frame) {
+  if (frame.jpeg) {
+    const j = frame.jpeg;
+    if (j instanceof Uint8Array) return j;
+    if (ArrayBuffer.isView(j)) {
+      return new Uint8Array(j.buffer, j.byteOffset, j.byteLength);
+    }
+    // Electron sometimes serializes Node Buffers as { type:'Buffer', data:[...] }
+    if (j && j.type === 'Buffer' && Array.isArray(j.data)) {
+      return Uint8Array.from(j.data);
+    }
+    if (Array.isArray(j)) return Uint8Array.from(j);
+  }
+  if (frame.data) return base64ToUint8Array(frame.data);
+  throw new Error('frame has no image data');
+}
+
 async function paintFrame(frame) {
-  const bytes = base64ToUint8Array(frame.data);
+  const bytes = toJpegBytes(frame);
   const blob = new Blob([bytes], { type: 'image/jpeg' });
   const bitmap = await createImageBitmap(blob);
 

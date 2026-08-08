@@ -7,6 +7,8 @@ const {
   Role,
   encodeMessage,
   decodeMessage,
+  isBinaryFrame,
+  decodeFrameBinary,
 } = require('@ss-remote/shared');
 
 let mainWindow = null;
@@ -139,7 +141,19 @@ function connectRelay() {
     startClipboardSync();
   });
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw, isBinary) => {
+    // Binary JPEG frames (faster / smaller than JSON base64)
+    if (isBinary || isBinaryFrame(raw)) {
+      const frame = decodeFrameBinary(raw);
+      if (!frame) return;
+      queueFrameToRenderer({
+        width: frame.width,
+        height: frame.height,
+        jpeg: frame.jpeg,
+      });
+      return;
+    }
+
     const msg = decodeMessage(raw);
     if (!msg) return;
 
@@ -162,6 +176,7 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.FRAME) {
+      // Legacy JSON frames (fallback)
       queueFrameToRenderer({
         width: msg.width,
         height: msg.height,

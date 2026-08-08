@@ -6,6 +6,7 @@ const {
   Role,
   encodeMessage,
   decodeMessage,
+  isBinaryFrame,
 } = require('@ss-remote/shared');
 
 const rooms = new Map();
@@ -21,6 +22,17 @@ function peerOf(room, role) {
   return role === Role.HOST ? room.controller : room.host;
 }
 
+function forwardRaw(ws, raw) {
+  const { pairCode, role } = ws.meta || {};
+  if (!pairCode || !role) return;
+  const room = getRoom(pairCode);
+  const other = peerOf(room, role);
+  if (other && other.readyState === 1) {
+    // Keep Buffer as Buffer — never .toString() (breaks binary frames)
+    other.send(raw);
+  }
+}
+
 function startRelay(port) {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -32,7 +44,13 @@ function startRelay(port) {
   wss.on('connection', (ws) => {
     ws.meta = { pairCode: null, role: null };
 
-    ws.on('message', (raw) => {
+    ws.on('message', (raw, isBinary) => {
+      // Binary screen frames — forward without JSON parse
+      if (isBinary || isBinaryFrame(raw)) {
+        forwardRaw(ws, raw);
+        return;
+      }
+
       const msg = decodeMessage(raw);
       if (!msg || !msg.type) return;
 
@@ -75,7 +93,6 @@ function startRelay(port) {
         return;
       }
 
-      // Forward frames, input, clipboard, and screen info to the peer
       if (
         msg.type === MessageType.FRAME ||
         msg.type === MessageType.INPUT ||
@@ -83,13 +100,7 @@ function startRelay(port) {
         msg.type === MessageType.CLIPBOARD ||
         msg.type === MessageType.INPUT_STATE
       ) {
-        const { pairCode, role } = ws.meta;
-        if (!pairCode || !role) return;
-        const room = getRoom(pairCode);
-        const other = peerOf(room, role);
-        if (other && other.readyState === 1) {
-          other.send(typeof raw === 'string' ? raw : raw.toString());
-        }
+        forwardRaw(ws, raw);
       }
     });
 

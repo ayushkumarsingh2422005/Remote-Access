@@ -15,6 +15,7 @@ const {
   Role,
   encodeMessage,
   decodeMessage,
+  encodeFrameBinary,
   LOG_PATH,
   ensureAppDir,
 } = require('@ss-remote/shared');
@@ -437,14 +438,48 @@ async function pollClipboard() {
   }
 }
 
+let pendingFramePacket = null;
+const SEND_BUFFER_LIMIT = 400_000; // ~400KB — keep Tailscale/WS from stalling
+
+function trySendFramePacket(packet) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (ws.bufferedAmount > SEND_BUFFER_LIMIT) {
+    pendingFramePacket = packet; // keep only newest
+    return false;
+  }
+  try {
+    ws.send(packet);
+    pendingFramePacket = null;
+    return true;
+  } catch (err) {
+    log('frame send error:', err.message);
+    return false;
+  }
+}
+
+function flushPendingFrame() {
+  if (!pendingFramePacket) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > SEND_BUFFER_LIMIT / 2) return;
+  try {
+    ws.send(pendingFramePacket);
+    pendingFramePacket = null;
+  } catch (err) {
+    log('frame flush error:', err.message);
+  }
+}
+
 async function captureAndSend() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !controllerConnected || capturing) {
+    flushPendingFrame();
     return;
   }
-  // If the tunnel is backed up, skip this capture so latency does not snowball
-  if (ws.bufferedAmount > 1_500_000) {
+  // If send buffer is full, don't capture more — just try to flush latest pending
+  if (ws.bufferedAmount > SEND_BUFFER_LIMIT) {
+    flushPendingFrame();
     return;
   }
+
   capturing = true;
   try {
     const img = await screenshot({ format: 'jpg' });
@@ -464,25 +499,15 @@ async function captureAndSend() {
       .jpeg({ quality: config.quality || 55, mozjpeg: true })
       .toBuffer();
 
-    // Drop if backlog appeared while we were encoding
-    if (!ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 1_500_000) {
-      return;
-    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    ws.send(
-      encodeMessage(MessageType.FRAME, {
-        width: outW,
-        height: outH,
-        scale,
-        nativeWidth: nativeSize.width,
-        nativeHeight: nativeSize.height,
-        data: jpeg.toString('base64'),
-      })
-    );
+    const packet = encodeFrameBinary(outW, outH, jpeg);
+    trySendFramePacket(packet);
   } catch (err) {
     log('capture error:', err.message);
   } finally {
     capturing = false;
+    flushPendingFrame();
   }
 }
 
@@ -495,6 +520,7 @@ function startCaptureLoop() {
   clipboardTimer = setInterval(() => {
     pollClipboard().catch(() => {});
   }, 500);
+  flushPendingFrame._timer = setInterval(flushPendingFrame, 100);
 }
 
 function stopCaptureLoop() {
@@ -502,10 +528,15 @@ function stopCaptureLoop() {
     clearInterval(captureTimer);
     captureTimer = null;
   }
+  if (flushPendingFrame._timer) {
+    clearInterval(flushPendingFrame._timer);
+    flushPendingFrame._timer = null;
+  }
   if (clipboardTimer) {
     clearInterval(clipboardTimer);
     clipboardTimer = null;
   }
+  pendingFramePacket = null;
 }
 
 function connect() {
