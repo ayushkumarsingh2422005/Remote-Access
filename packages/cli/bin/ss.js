@@ -450,8 +450,10 @@ async function main() {
       if (sub === 'all') await startAll();
       else if (sub === 'agent') {
         const config = loadConfig();
+        const port = config.relayPort || 9000;
+        // Host agent must hit the local relay — never the public controller URL
         startDetached(AGENT_ENTRY, PID_PATH, 'agent', {
-          SS_RELAY_URL: config.relayUrl,
+          SS_RELAY_URL: `ws://127.0.0.1:${port}`,
         });
       } else if (sub === 'relay') {
         const config = loadConfig();

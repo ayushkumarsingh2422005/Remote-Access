@@ -115,7 +115,8 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
     }
   );
 
-  let lastFire = 0;
+  let lastLockFire = 0;
+  let lastUnlockFire = 0;
   const handleLine = (line) => {
     const msg = String(line || '').trim();
     if (!msg) return;
@@ -125,12 +126,13 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       return;
     }
     const now = Date.now();
-    if (now - lastFire < 350) return;
     if (msg === 'LOCK') {
-      lastFire = now;
+      if (now - lastLockFire < 350) return;
+      lastLockFire = now;
       onLock();
     } else if (msg === 'UNLOCK') {
-      lastFire = now;
+      if (now - lastUnlockFire < 350) return;
+      lastUnlockFire = now;
       onUnlock();
     } else if (msg.startsWith('ERR:') && log) {
       log('hotkeys:', msg.slice(4).trim());
@@ -161,7 +163,14 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
 
   return () => {
     try {
-      child.kill();
+      if (process.platform === 'win32' && child.pid) {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        child.kill();
+      }
     } catch {
       /* ignore */
     }

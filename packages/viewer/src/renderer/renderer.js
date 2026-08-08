@@ -149,7 +149,8 @@ function applySession(data) {
   }
 
   if (!inputEnabled) {
-    pressedKeys.clear();
+    if (pressedKeys.size > 0) releaseAllLocalKeys();
+    else pressedKeys.clear();
     latestNorm = null;
     if (cursorEl) cursorEl.style.opacity = '0';
   }
@@ -194,8 +195,20 @@ function mapCoords(clientX, clientY) {
 }
 
 function sendInput(event) {
-  if (!inputEnabled) return;
+  // Allow key/mouse releases even when locked so the host doesn't keep stuck modifiers
+  const isRelease = event && (event.action === 'keyup' || event.action === 'mouseup');
+  if (!inputEnabled && !isRelease) return;
   window.ssRemote.sendInput(event);
+}
+
+function releaseAllLocalKeys() {
+  for (const code of pressedKeys) {
+    window.ssRemote.sendInput({ action: 'keyup', key: code, code });
+  }
+  pressedKeys.clear();
+  // Also release primary mouse buttons in case a drag was mid-flight
+  window.ssRemote.sendInput({ action: 'mouseup', button: 0, nx: 0.5, ny: 0.5 });
+  window.ssRemote.sendInput({ action: 'mouseup', button: 2, nx: 0.5, ny: 0.5 });
 }
 
 function flushMove() {
@@ -350,8 +363,13 @@ canvas.addEventListener('mouseup', (e) => {
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+let lastScrollAt = 0;
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (!inputEnabled) return;
+  const now = Date.now();
+  if (now - lastScrollAt < 30) return; // throttle scroll storms
+  lastScrollAt = now;
   sendInput({ action: 'scroll', dy: e.deltaY, deltaY: e.deltaY });
 }, { passive: false });
 

@@ -139,6 +139,34 @@ async function ensureCloudflared() {
 
 async function startLocalTunnel(localPort) {
   ensureAppDir();
+  // Don't orphan a previous tunnel process
+  try {
+    if (fs.existsSync(TUNNEL_PID_PATH)) {
+      const oldPid = Number(fs.readFileSync(TUNNEL_PID_PATH, 'utf8').trim());
+      if (oldPid && isPidAlive(oldPid)) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/PID', String(oldPid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+        } else {
+          try {
+            process.kill(oldPid, 'SIGTERM');
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      try {
+        fs.unlinkSync(TUNNEL_PID_PATH);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   const keeper = path.join(__dirname, 'tunnel-keeper.js');
   const out = fs.openSync(LOG_PATH, 'a');
   const child = spawn(process.execPath, [keeper, String(localPort)], {

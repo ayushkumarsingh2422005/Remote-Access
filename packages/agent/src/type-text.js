@@ -5,6 +5,9 @@ const path = require('path');
 
 const WIN_TYPE_SCRIPT = path.join(__dirname, 'win-type.ps1');
 
+let activeChild = null;
+let cancelRequested = false;
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -20,10 +23,40 @@ function writeTempText(text) {
   return file;
 }
 
+function killProcessTree(child) {
+  if (!child || !child.pid) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } else {
+      child.kill('SIGKILL');
+    }
+  } catch {
+    try {
+      child.kill();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Stop any in-flight mimic typing immediately (lock / host busy / shutdown). */
+function cancelTyping() {
+  cancelRequested = true;
+  if (activeChild) {
+    killProcessTree(activeChild);
+    activeChild = null;
+  }
+}
+
 function typeWindowsSendInput(text, delayMs, tabWidth) {
   const delay = Math.max(0, Number(delayMs) || 0);
   const normalized = expandTabs(text, tabWidth);
   const file = writeTempText(normalized);
+  cancelRequested = false;
 
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -43,14 +76,15 @@ function typeWindowsSendInput(text, delayMs, tabWidth) {
       ],
       { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
     );
+    activeChild = child;
 
     let stderr = '';
     const timeoutMs = Math.min(
-      30 * 60_000,
-      30_000 + Math.max(1, normalized.length) * (delay + 8) * 2
+      10 * 60_000,
+      20_000 + Math.max(1, normalized.length) * (delay + 8) * 2
     );
     const timer = setTimeout(() => {
-      child.kill();
+      killProcessTree(child);
       reject(new Error('Keyboard inject timed out'));
     }, timeoutMs);
 
@@ -59,12 +93,18 @@ function typeWindowsSendInput(text, delayMs, tabWidth) {
     });
     child.on('error', (err) => {
       clearTimeout(timer);
+      if (activeChild === child) activeChild = null;
       cleanup();
       reject(err);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (activeChild === child) activeChild = null;
       cleanup();
+      if (cancelRequested) {
+        resolve(); // cancelled cleanly
+        return;
+      }
       if (code === 0) resolve();
       else reject(new Error(stderr.trim() || `win-type.ps1 exited ${code}`));
     });
@@ -84,8 +124,10 @@ async function typeWithNut(text, delayMs, tabWidth) {
   keyboard.config.autoDelayMs = 0;
   const delay = Math.max(0, Number(delayMs) || 0);
   const normalized = expandTabs(text, tabWidth);
+  cancelRequested = false;
 
   for (const char of normalized) {
+    if (cancelRequested) return;
     if (char === '\r') continue;
     if (char === '\n') {
       await keyboard.pressKey(Key.Enter);
@@ -107,7 +149,11 @@ async function typeWithNut(text, delayMs, tabWidth) {
 async function typeMimic(text, options = {}, log = () => {}) {
   const delayMs = Math.max(0, Number(options.delayMs) || 0);
   const tabWidth = Math.max(1, Math.min(16, Number(options.tabWidth) || 4));
-  const normalized = expandTabs(text, tabWidth);
+  // Hard cap — long runs monopolize the host keyboard
+  const maxChars = Math.max(100, Math.min(20000, Number(options.maxChars) || 8000));
+  const raw = String(text || '');
+  const clipped = raw.length > maxChars ? raw.slice(0, maxChars) : raw;
+  const normalized = expandTabs(clipped, tabWidth);
   if (!normalized) return;
 
   log(`type-mimic chars=${normalized.length} delayMs=${delayMs}`);
@@ -121,5 +167,6 @@ async function typeMimic(text, options = {}, log = () => {}) {
 
 module.exports = {
   typeMimic,
+  cancelTyping,
   expandTabs,
 };

@@ -21,7 +21,7 @@ const {
 } = require('@ss-remote/shared');
 const fs = require('fs');
 const { startHostHotkeys } = require('./hotkeys');
-const { typeMimic } = require('./type-text');
+const { typeMimic, cancelTyping } = require('./type-text');
 
 mouse.config.autoDelayMs = 0;
 keyboard.config.autoDelayMs = 0;
@@ -29,7 +29,9 @@ keyboard.config.autoDelayMs = 0;
 let clipboardy;
 function getClipboard() {
   if (!clipboardy) {
-    clipboardy = require('clipboardy');
+    const mod = require('clipboardy');
+    // clipboardy v3+/v4 CJS interop exposes API on .default
+    clipboardy = mod && typeof mod.write === 'function' ? mod : mod.default;
   }
   return clipboardy;
 }
@@ -57,6 +59,12 @@ let applyingClipboard = false;
 // Coalesce mouse moves so the cursor does not lag behind a queue of awaits
 let pendingMove = null;
 let moveInFlight = false;
+
+// Serialize all other input — overlapping press/release caused stuck keys
+let inputChain = Promise.resolve();
+const downKeys = new Set(); // nut-js Key values currently pressed by us
+const downButtons = new Set(); // nut-js Button values currently pressed by us
+let typingBusy = false;
 
 const config = loadConfig();
 if (process.env.SS_RELAY_URL) {
@@ -232,6 +240,8 @@ function broadcastInputState(force = false) {
 function syncInputGate() {
   if (!isInputEnabled()) {
     pendingMove = null;
+    cancelTyping();
+    forceReleaseAll().catch((err) => log('forceRelease error:', err.message));
   }
   broadcastInputState();
 }
@@ -249,6 +259,44 @@ function noteRemoteInject() {
   const pad = Math.max(250, Number(config.hostInjectGraceMs) || 450);
   suppressHostUntil = Date.now() + pad;
   suppressEchoSkips = 0;
+}
+
+async function forceReleaseAll() {
+  const keys = [...downKeys];
+  const buttons = [...downButtons];
+  downKeys.clear();
+  downButtons.clear();
+  for (const key of keys) {
+    try {
+      await keyboard.releaseKey(key);
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const btn of buttons) {
+    try {
+      await mouse.releaseButton(btn);
+    } catch {
+      /* ignore */
+    }
+  }
+  // Always clear Ctrl in case paste chord left it down
+  try {
+    await keyboard.releaseKey(Key.LeftControl);
+  } catch {
+    /* ignore */
+  }
+}
+
+function enqueueInput(event) {
+  inputChain = inputChain
+    .then(() => applyInput(event))
+    .catch((err) => log('input queue error:', err.message));
+  return inputChain;
+}
+
+function isReleaseEvent(event) {
+  return event && (event.action === 'keyup' || event.action === 'mouseup');
 }
 
 function armHostIdleTimer() {
@@ -278,6 +326,8 @@ function onHostPhysicalActivity() {
 
   const wasBusy = hostBusy;
   hostBusy = true;
+  // Cancel runaway remote typing immediately when host takes over
+  cancelTyping();
   armHostIdleTimer();
 
   if (!wasBusy) {
@@ -313,34 +363,44 @@ function setupHotkeys() {
   }
 }
 
-let typingBusy = false;
+let typingGeneration = 0;
 
 async function applyInput(event) {
-  if (!isInputEnabled()) return;
-  noteRemoteInject();
+  if (!event || !event.action) return;
+
+  // Releases must always run — otherwise Ctrl/Shift/mouse stay stuck after lock
+  const isRelease = isReleaseEvent(event);
+  if (!isInputEnabled() && !isRelease) return;
+
   try {
+    if (event.action === 'clipboard-only') {
+      if (!isInputEnabled()) return;
+      await applyClipboardText(event.text || '');
+      return;
+    }
+
     if (event.action === 'type-text') {
+      if (!isInputEnabled()) return;
       if (typingBusy) return;
       typingBusy = true;
+      const gen = ++typingGeneration;
       try {
         const raw = String(event.text || '');
-        const text = raw.length > 100000 ? raw.slice(0, 100000) : raw;
+        const text = raw.length > 8000 ? raw.slice(0, 8000) : raw;
         const delayMs = Math.max(0, Math.min(200, Number(event.delayMs) || 25));
         const approxMs = Math.max(1000, text.length * (delayMs + 10));
-        suppressHostUntil = Date.now() + approxMs + 800;
-        await typeMimic(
-          text,
-          { delayMs, tabWidth: event.tabWidth || 4 },
-          log
-        );
-        noteRemoteInject();
+        suppressHostUntil = Date.now() + Math.min(approxMs, 120_000) + 800;
+        await typeMimic(text, { delayMs, tabWidth: event.tabWidth || 4, maxChars: 8000 }, log);
+        if (gen === typingGeneration && isInputEnabled()) noteRemoteInject();
       } finally {
-        typingBusy = false;
+        if (gen === typingGeneration) typingBusy = false;
       }
       return;
     }
 
     if (event.action === 'mousemove') {
+      if (!isInputEnabled()) return;
+      // Never noteRemoteInject on move — it blocked host takeover
       pendingMove = toNativeCoords(event);
       flushMouseMove().catch(() => {});
       return;
@@ -349,24 +409,43 @@ async function applyInput(event) {
     if (event.action === 'mousedown' || event.action === 'mouseup') {
       const { x, y } = toNativeCoords(event);
       pendingMove = null;
-      noteRemoteInject();
-      await mouse.setPosition(new Point(x, y));
       const btn =
         event.button === 2
           ? Button.RIGHT
           : event.button === 1
             ? Button.MIDDLE
             : Button.LEFT;
-      noteRemoteInject();
-      if (event.action === 'mousedown') await mouse.pressButton(btn);
-      else await mouse.releaseButton(btn);
-      noteRemoteInject();
+
+      if (event.action === 'mousedown') {
+        if (!isInputEnabled()) return;
+        noteRemoteInject();
+        await mouse.setPosition(new Point(x, y));
+        noteRemoteInject();
+        await mouse.pressButton(btn);
+        downButtons.add(btn);
+        noteRemoteInject();
+      } else {
+        noteRemoteInject();
+        try {
+          await mouse.setPosition(new Point(x, y));
+        } catch {
+          /* still try release */
+        }
+        await mouse.releaseButton(btn);
+        downButtons.delete(btn);
+        noteRemoteInject();
+      }
       return;
     }
 
     if (event.action === 'scroll') {
+      if (!isInputEnabled()) return;
       noteRemoteInject();
-      const amount = Math.max(1, Math.round(Math.abs(event.dy || event.deltaY || 1) / 40));
+      // Cap scroll amount to avoid inject storms
+      const amount = Math.max(
+        1,
+        Math.min(6, Math.round(Math.abs(event.dy || event.deltaY || 1) / 40))
+      );
       if ((event.dy || event.deltaY || 0) < 0) await mouse.scrollUp(amount);
       else await mouse.scrollDown(amount);
       noteRemoteInject();
@@ -374,29 +453,49 @@ async function applyInput(event) {
     }
 
     if (event.action === 'paste-text') {
+      if (!isInputEnabled()) return;
       noteRemoteInject();
       await applyClipboardText(event.text || '');
-      await keyboard.pressKey(Key.LeftControl);
-      await keyboard.pressKey(Key.V);
-      await keyboard.releaseKey(Key.V);
-      await keyboard.releaseKey(Key.LeftControl);
+      if (!isInputEnabled()) return;
+      try {
+        await keyboard.pressKey(Key.LeftControl);
+        downKeys.add(Key.LeftControl);
+        await keyboard.pressKey(Key.V);
+        await keyboard.releaseKey(Key.V);
+      } finally {
+        try {
+          await keyboard.releaseKey(Key.LeftControl);
+        } catch {
+          /* ignore */
+        }
+        downKeys.delete(Key.LeftControl);
+      }
       noteRemoteInject();
       return;
     }
 
     if (event.action === 'keydown' || event.action === 'keyup') {
       const key = resolveKey(event.key, event.code);
-      noteRemoteInject();
-      if (!key) {
-        if (event.action === 'keydown' && event.key && event.key.length === 1) {
-          await keyboard.type(event.key);
-        }
+      if (event.action === 'keydown') {
+        if (!isInputEnabled()) return;
         noteRemoteInject();
-        return;
+        if (!key) {
+          if (event.key && event.key.length === 1) {
+            await keyboard.type(event.key);
+          }
+          noteRemoteInject();
+          return;
+        }
+        await keyboard.pressKey(key);
+        downKeys.add(key);
+        noteRemoteInject();
+      } else {
+        noteRemoteInject();
+        if (!key) return;
+        await keyboard.releaseKey(key);
+        downKeys.delete(key);
+        noteRemoteInject();
       }
-      if (event.action === 'keydown') await keyboard.pressKey(key);
-      else await keyboard.releaseKey(key);
-      noteRemoteInject();
     }
   } catch (err) {
     log('input error:', err.message);
@@ -483,35 +582,44 @@ async function captureAndSend() {
     flushPendingFrame();
     return;
   }
-  // If send buffer is full, don't capture more — just try to flush latest pending
   if (ws.bufferedAmount > SEND_BUFFER_LIMIT) {
     flushPendingFrame();
     return;
   }
 
   capturing = true;
+  const CAPTURE_TIMEOUT_MS = 8000;
   try {
-    const img = await screenshot({ format: 'jpg' });
-    const meta = await sharp(img).metadata();
-    const srcW = meta.width || nativeSize.width;
-    const srcH = meta.height || nativeSize.height;
+    const work = (async () => {
+      const img = await screenshot({ format: 'jpg' });
+      const meta = await sharp(img).metadata();
+      const srcW = meta.width || nativeSize.width;
+      const srcH = meta.height || nativeSize.height;
 
-    const maxW = config.maxWidth || 1280;
-    const scale = srcW > maxW ? srcW / maxW : 1;
-    const outW = Math.round(srcW / scale);
-    const outH = Math.round(srcH / scale);
+      const maxW = config.maxWidth || 1280;
+      const scale = srcW > maxW ? srcW / maxW : 1;
+      const outW = Math.round(srcW / scale);
+      const outH = Math.round(srcH / scale);
 
-    screenMeta = { width: outW, height: outH, scale };
+      screenMeta = { width: outW, height: outH, scale };
 
-    const jpeg = await sharp(img)
-      .resize(outW, outH, { fit: 'fill' })
-      .jpeg({ quality: config.quality || 55, mozjpeg: true })
-      .toBuffer();
+      const jpeg = await sharp(img)
+        .resize(outW, outH, { fit: 'fill' })
+        .jpeg({ quality: config.quality || 55, mozjpeg: true })
+        .toBuffer();
 
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    const packet = encodeFrameBinary(outW, outH, jpeg);
-    trySendFramePacket(packet);
+      const packet = encodeFrameBinary(outW, outH, jpeg);
+      trySendFramePacket(packet);
+    })();
+
+    await Promise.race([
+      work,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('capture timed out')), CAPTURE_TIMEOUT_MS);
+      }),
+    ]);
   } catch (err) {
     log('capture error:', err.message);
   } finally {
@@ -552,6 +660,16 @@ function connect() {
   const url = config.relayUrl;
   log('connecting to relay', url);
 
+  if (ws) {
+    try {
+      ws.removeAllListeners();
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+    ws = null;
+  }
+
   ws = new WebSocket(url);
 
   ws.on('open', () => {
@@ -564,22 +682,27 @@ function connect() {
     );
   });
 
-  ws.on('message', async (raw) => {
+  ws.on('message', (raw) => {
     const msg = decodeMessage(raw);
     if (!msg) return;
 
     if (msg.type === MessageType.REGISTERED) {
       log('registered as host, pairCode=', config.pairCode);
-      await refreshNativeSize();
-      ws.send(
-        encodeMessage(MessageType.SCREEN_INFO, {
-          width: screenMeta.width,
-          height: screenMeta.height,
-          scale: screenMeta.scale,
-          nativeWidth: nativeSize.width,
-          nativeHeight: nativeSize.height,
+      refreshNativeSize()
+        .then(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(
+            encodeMessage(MessageType.SCREEN_INFO, {
+              width: screenMeta.width,
+              height: screenMeta.height,
+              scale: screenMeta.scale,
+              nativeWidth: nativeSize.width,
+              nativeHeight: nativeSize.height,
+            })
+          );
         })
-      );
+        .catch(() => {});
+      return;
     }
 
     if (msg.type === MessageType.PEER_JOINED && msg.role === Role.CONTROLLER) {
@@ -587,22 +710,32 @@ function connect() {
       controllerConnected = true;
       startCaptureLoop();
       broadcastInputState(true);
+      return;
     }
 
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.CONTROLLER) {
       log('controller disconnected — waiting');
       controllerConnected = false;
       stopCaptureLoop();
+      cancelTyping();
+      forceReleaseAll().catch(() => {});
+      return;
     }
 
     if (msg.type === MessageType.INPUT && msg.event) {
-      if (!isInputEnabled()) return;
-      await applyInput(msg.event);
+      // Moves bypass queue (coalesced); everything else is serialized
+      if (msg.event.action === 'mousemove') {
+        if (!isInputEnabled()) return;
+        applyInput(msg.event).catch(() => {});
+      } else {
+        enqueueInput(msg.event);
+      }
+      return;
     }
 
     if (msg.type === MessageType.CLIPBOARD && msg.from === Role.CONTROLLER) {
       if (!isInputEnabled()) return;
-      await applyClipboardText(msg.text || '');
+      enqueueInput({ action: 'clipboard-only', text: msg.text || '' });
     }
   });
 
@@ -610,6 +743,8 @@ function connect() {
     log('relay connection closed — reconnecting');
     controllerConnected = false;
     stopCaptureLoop();
+    cancelTyping();
+    forceReleaseAll().catch(() => {});
     scheduleReconnect();
   });
 
@@ -628,6 +763,8 @@ function scheduleReconnect() {
 
 function shutdown() {
   stopCaptureLoop();
+  cancelTyping();
+  forceReleaseAll().catch(() => {});
   if (hostIdleTimer) {
     clearTimeout(hostIdleTimer);
     hostIdleTimer = null;

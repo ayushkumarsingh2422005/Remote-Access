@@ -357,7 +357,10 @@ function connectRelay() {
 
 ipcMain.on('input', (_event, inputEvent) => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (!session.inputEnabled) return;
+  const isRelease =
+    inputEvent &&
+    (inputEvent.action === 'keyup' || inputEvent.action === 'mouseup');
+  if (!session.inputEnabled && !isRelease) return;
   ws.send(encodeMessage(MessageType.INPUT, { event: inputEvent }));
 });
 
