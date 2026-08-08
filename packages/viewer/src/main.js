@@ -20,12 +20,138 @@ let lastClipboardApplied = '';
 let applyingClipboard = false;
 let latestFrame = null;
 let frameFlushScheduled = false;
-let lastInputState = {
-  enabled: true,
-  reason: 'enabled',
-  message: 'Keyboard and Mouse enabled',
-};
 const config = loadConfig();
+
+/**
+ * Single source of truth for header status + lock labels.
+ * Renderer only displays what we push — it must not invent connection state.
+ */
+const session = {
+  // connecting | connected | disconnected | error
+  connection: 'connecting',
+  hostPresent: false,
+  inputEnabled: true,
+  inputReason: 'enabled',
+  inputMessage: 'Keyboard and Mouse enabled',
+  pairCode: config.pairCode || '',
+  relayUrl: config.relayUrl || '',
+  errorMessage: '',
+};
+
+function deriveStatusPayload() {
+  const base = {
+    pairCode: session.pairCode,
+    relayUrl: session.relayUrl,
+    hostPresent: session.hostPresent,
+    inputEnabled: session.inputEnabled,
+    inputReason: session.inputReason,
+    inputMessage: session.inputMessage,
+  };
+
+  if (session.connection === 'error') {
+    return {
+      ...base,
+      state: 'error',
+      message: session.errorMessage || `Cannot reach relay at ${session.relayUrl}`,
+    };
+  }
+  if (session.connection === 'disconnected') {
+    return {
+      ...base,
+      state: 'disconnected',
+      message: 'Relay disconnected',
+    };
+  }
+  if (session.connection === 'connecting') {
+    return {
+      ...base,
+      state: 'connecting',
+      message: 'Connecting to relay…',
+    };
+  }
+
+  // Connected to relay
+  if (!session.hostPresent) {
+    return {
+      ...base,
+      state: 'connected',
+      message: 'Connected — waiting for host…',
+    };
+  }
+
+  if (!session.inputEnabled) {
+    return {
+      ...base,
+      state: 'locked',
+      message: session.inputMessage || (
+        session.inputReason === 'host'
+          ? 'Host is using this PC'
+          : 'Keyboard & Mouse disabled'
+      ),
+    };
+  }
+
+  return {
+    ...base,
+    state: 'ready',
+    message: 'Live — you have full control',
+  };
+}
+
+function pushSession() {
+  const status = deriveStatusPayload();
+  sendToRenderer('session', status);
+  // Keep legacy channels for compatibility
+  sendToRenderer('status', status);
+  sendToRenderer('input-state', {
+    enabled: session.inputEnabled,
+    reason: session.inputReason,
+    message: session.inputMessage,
+  });
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!session.inputEnabled && session.hostPresent && session.connection === 'connected') {
+      mainWindow.setTitle(`SS Remote — ${status.message}`);
+    } else if (session.hostPresent && session.connection === 'connected') {
+      mainWindow.setTitle('SS Remote — Live');
+    } else {
+      mainWindow.setTitle('SS Remote — Controller');
+    }
+  }
+}
+
+function setConnection(connection, errorMessage = '') {
+  session.connection = connection;
+  session.errorMessage = errorMessage || '';
+  if (connection === 'disconnected' || connection === 'error' || connection === 'connecting') {
+    session.hostPresent = false;
+  }
+  pushSession();
+}
+
+function setHostPresent(present) {
+  session.hostPresent = !!present;
+  if (!present) {
+    session.inputEnabled = true;
+    session.inputReason = 'enabled';
+    session.inputMessage = 'Keyboard and Mouse enabled';
+  }
+  pushSession();
+}
+
+function applyInputState(msg) {
+  const enabled = msg.enabled !== false && msg.enabled !== 'false';
+  session.inputEnabled = enabled;
+  session.inputReason = msg.reason || (enabled ? 'enabled' : 'manual');
+  session.inputMessage =
+    msg.message ||
+    (enabled
+      ? 'Keyboard and Mouse enabled'
+      : session.inputReason === 'host'
+        ? 'Host is using this PC'
+        : 'Keyboard and Mouse disabled');
+  pushSession();
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -45,39 +171,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.webContents.on('did-finish-load', () => {
-    // Replay latest lock/host state — IPC before load is dropped
-    sendToRenderer('input-state', lastInputState);
-    sendToRenderer('status', {
-      state: ws && ws.readyState === WebSocket.OPEN ? 'connected' : 'connecting',
-      relayUrl: config.relayUrl,
-      pairCode: config.pairCode,
-    });
+    // Replay authoritative session — never hardcode "waiting for host"
+    pushSession();
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-}
-
-function applyInputState(msg) {
-  const enabled = msg.enabled !== false && msg.enabled !== 'false';
-  lastInputState = {
-    enabled,
-    reason: msg.reason || (enabled ? 'enabled' : 'manual'),
-    message:
-      msg.message ||
-      (enabled
-        ? 'Keyboard and Mouse enabled'
-        : 'Keyboard and Mouse disabled'),
-  };
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setTitle(
-      enabled
-        ? 'SS Remote — Controller'
-        : `SS Remote — ${lastInputState.message}`
-    );
-  }
-  sendToRenderer('input-state', lastInputState);
 }
 
 function sendToRenderer(channel, payload) {
@@ -91,11 +190,15 @@ function flushLatestFrame() {
   if (!latestFrame) return;
   const frame = latestFrame;
   latestFrame = null;
+  // Frames prove the host is sharing — promote out of "waiting"
+  if (!session.hostPresent && session.connection === 'connected') {
+    session.hostPresent = true;
+    pushSession();
+  }
   sendToRenderer('frame', frame);
 }
 
 function queueFrameToRenderer(frame) {
-  // Drop older frames — only the newest matters for live desktop
   latestFrame = frame;
   if (!frameFlushScheduled) {
     frameFlushScheduled = true;
@@ -158,7 +261,9 @@ function connectRelay() {
     }
   }
 
-  sendToRenderer('status', { state: 'connecting', relayUrl: config.relayUrl });
+  session.pairCode = config.pairCode || '';
+  session.relayUrl = config.relayUrl || '';
+  setConnection('connecting');
 
   ws = new WebSocket(config.relayUrl);
 
@@ -169,23 +274,20 @@ function connectRelay() {
         pairCode: config.pairCode,
       })
     );
-    sendToRenderer('status', {
-      state: 'connected',
-      relayUrl: config.relayUrl,
-      pairCode: config.pairCode,
-    });
+    session.connection = 'connected';
+    session.hostPresent = false;
+    session.errorMessage = '';
+    pushSession();
     startClipboardSync();
   });
 
   ws.on('message', (raw, isBinary) => {
-    // Binary JPEG frames (faster / smaller than JSON base64)
     if (isBinary || isBinaryFrame(raw)) {
       const frame = decodeFrameBinary(raw);
       if (!frame || !frame.jpeg || frame.jpeg.length < 2) return;
       queueFrameToRenderer({
         width: frame.width,
         height: frame.height,
-        // Copy so IPC gets a standalone Buffer (subarray views can serialize oddly)
         jpeg: Buffer.from(frame.jpeg),
       });
       return;
@@ -195,25 +297,16 @@ function connectRelay() {
     if (!msg) return;
 
     if (msg.type === MessageType.PEER_JOINED && msg.role === Role.HOST) {
-      sendToRenderer('status', {
-        state: 'ready',
-        relayUrl: config.relayUrl,
-        pairCode: config.pairCode,
-        message: 'Host is sharing — live view active',
-      });
+      setHostPresent(true);
     }
 
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.HOST) {
       latestFrame = null;
-      sendToRenderer('status', {
-        state: 'waiting',
-        message: 'Host disconnected — waiting…',
-      });
+      setHostPresent(false);
       sendToRenderer('frame', null);
     }
 
     if (msg.type === MessageType.FRAME) {
-      // Legacy JSON frames (fallback)
       queueFrameToRenderer({
         width: msg.width,
         height: msg.height,
@@ -225,6 +318,7 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.SCREEN_INFO) {
+      if (!session.hostPresent) setHostPresent(true);
       sendToRenderer('screen-info', msg);
     }
 
@@ -238,21 +332,16 @@ function connectRelay() {
     }
 
     if (msg.type === MessageType.ERROR) {
-      sendToRenderer('status', { state: 'error', message: msg.error });
+      setConnection('error', msg.error || 'Error');
     }
   });
 
   ws.on('close', () => {
     stopClipboardSync();
-    lastInputState = {
-      enabled: true,
-      reason: 'enabled',
-      message: 'Keyboard and Mouse enabled',
-    };
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setTitle('SS Remote — Controller');
-    }
-    sendToRenderer('status', { state: 'disconnected', message: 'Relay disconnected' });
+    session.inputEnabled = true;
+    session.inputReason = 'enabled';
+    session.inputMessage = 'Keyboard and Mouse enabled';
+    setConnection('disconnected');
     if (!reconnectTimer) {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -262,20 +351,19 @@ function connectRelay() {
   });
 
   ws.on('error', () => {
-    sendToRenderer('status', {
-      state: 'error',
-      message: `Cannot reach relay at ${config.relayUrl}`,
-    });
+    setConnection('error', `Cannot reach relay at ${config.relayUrl}`);
   });
 }
 
 ipcMain.on('input', (_event, inputEvent) => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!session.inputEnabled) return;
   ws.send(encodeMessage(MessageType.INPUT, { event: inputEvent }));
 });
 
 ipcMain.on('clipboard-to-host', (_event, text) => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!session.inputEnabled) return;
   if (typeof text !== 'string') return;
   const payload = text.length > 200000 ? text.slice(0, 200000) : text;
   lastClipboardSent = payload;
@@ -288,7 +376,12 @@ ipcMain.on('clipboard-to-host', (_event, text) => {
 });
 
 ipcMain.handle('get-config', () => loadConfig());
-ipcMain.handle('get-input-state', () => lastInputState);
+ipcMain.handle('get-session', () => deriveStatusPayload());
+ipcMain.handle('get-input-state', () => ({
+  enabled: session.inputEnabled,
+  reason: session.inputReason,
+  message: session.inputMessage,
+}));
 ipcMain.handle('read-clipboard', () => {
   try {
     return clipboard.readText();

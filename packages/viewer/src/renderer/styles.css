@@ -100,7 +100,8 @@ body {
 }
 
 .status.waiting,
-.status.connecting {
+.status.connecting,
+.status.locked {
   color: var(--warn);
 }
 

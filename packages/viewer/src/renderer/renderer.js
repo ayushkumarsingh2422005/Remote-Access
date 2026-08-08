@@ -74,31 +74,106 @@ function updateMeta() {
   }
 }
 
-function setStatus(data) {
-  const state = data.state || 'unknown';
-
-  if (!inputEnabled && (state === 'ready' || state === 'connected')) {
-    if (data.pairCode) pairCode = data.pairCode;
-    if (data.relayUrl) relayUrl = data.relayUrl;
-    updateMeta();
-    return;
-  }
-
-  statusEl.className = `status ${state}`;
-  statusEl.textContent =
-    data.message ||
-    ({
-      connecting: 'Connecting to relay…',
-      connected: 'Connected — waiting for host…',
-      waiting: 'Waiting for host…',
-      ready: 'Live — you have full control',
-      disconnected: 'Disconnected',
-      error: data.message || 'Error',
-    }[state] || state);
+/**
+ * Apply authoritative session from main process.
+ * Main owns connection + lock state; renderer only paints it.
+ */
+function applySession(data) {
+  if (!data || typeof data !== 'object') return;
 
   if (data.pairCode) pairCode = data.pairCode;
   if (data.relayUrl) relayUrl = data.relayUrl;
+
+  const hasInputFields =
+    typeof data.inputEnabled === 'boolean' ||
+    typeof data.enabled === 'boolean' ||
+    data.state === 'locked';
+
+  if (hasInputFields) {
+    if (data.state === 'locked') {
+      inputEnabled = false;
+    } else if (typeof data.inputEnabled === 'boolean') {
+      inputEnabled = data.inputEnabled;
+    } else if (typeof data.enabled === 'boolean') {
+      inputEnabled = data.enabled;
+    } else {
+      inputEnabled = data.inputEnabled !== false && data.inputEnabled !== 'false';
+    }
+  }
+
+  if (!inputEnabled) {
+    controlReason =
+      data.inputReason === 'host' || data.reason === 'host' ? 'host' : 'manual';
+    controlLabel =
+      data.inputMessage ||
+      data.message ||
+      (controlReason === 'host'
+        ? 'Host is using this PC'
+        : 'Keyboard & Mouse disabled');
+  } else {
+    controlLabel = '';
+    controlReason = '';
+  }
+
+  if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
+
+  showEl(inputLockEl, !inputEnabled);
+  if (inputLockEl) {
+    inputLockEl.classList.toggle('host', controlReason === 'host');
+    inputLockEl.classList.toggle('manual', !inputEnabled && controlReason !== 'host');
+    inputLockEl.textContent = controlLabel || 'Keyboard & Mouse disabled';
+  }
+
+  showEl(controlBadgeEl, !inputEnabled);
+  if (controlBadgeEl) {
+    controlBadgeEl.classList.toggle('host', controlReason === 'host');
+    controlBadgeEl.classList.toggle('manual', !inputEnabled && controlReason !== 'host');
+    controlBadgeEl.textContent = controlLabel || 'Locked';
+  }
+
+  // Only update connection/status text when main sent an explicit state
+  if (data.state) {
+    const state = data.state;
+    statusEl.className = `status ${state === 'locked' ? 'waiting' : state}`;
+    statusEl.textContent =
+      data.message ||
+      ({
+        connecting: 'Connecting to relay…',
+        connected: 'Connected — waiting for host…',
+        waiting: 'Waiting for host…',
+        ready: 'Live — you have full control',
+        locked: controlLabel || 'Input disabled',
+        disconnected: 'Disconnected',
+        error: data.message || 'Error',
+      }[state] || state);
+  }
+
+  if (!inputEnabled) {
+    pressedKeys.clear();
+    latestNorm = null;
+    if (cursorEl) cursorEl.style.opacity = '0';
+  }
+
   updateMeta();
+}
+
+function setStatus(data) {
+  applySession(data);
+}
+
+function setInputEnabled(enabled, message, reason) {
+  const on = enabled !== false && enabled !== 'false';
+  applySession({
+    state: on ? undefined : 'locked',
+    inputEnabled: on,
+    inputReason: reason,
+    inputMessage: message,
+    message: on
+      ? undefined
+      : message || (reason === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled'),
+    pairCode,
+    relayUrl,
+  });
 }
 
 function mapCoords(clientX, clientY) {
@@ -116,50 +191,6 @@ function mapCoords(clientX, clientY) {
     nx,
     ny,
   };
-}
-
-function setInputEnabled(enabled, message, reason) {
-  inputEnabled = enabled !== false && enabled !== 'false';
-  if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
-
-  if (inputEnabled) {
-    controlLabel = '';
-    controlReason = '';
-    showEl(inputLockEl, false);
-    if (inputLockEl) inputLockEl.classList.remove('host', 'manual');
-    showEl(controlBadgeEl, false);
-    if (controlBadgeEl) controlBadgeEl.classList.remove('host', 'manual');
-    statusEl.className = 'status ready';
-    statusEl.textContent = 'Live — you have full control';
-  } else {
-    controlReason = reason === 'host' ? 'host' : 'manual';
-    controlLabel =
-      message ||
-      (controlReason === 'host'
-        ? 'Host is using this PC'
-        : 'Keyboard & Mouse disabled');
-
-    showEl(inputLockEl, true);
-    if (inputLockEl) {
-      inputLockEl.classList.toggle('host', controlReason === 'host');
-      inputLockEl.classList.toggle('manual', controlReason !== 'host');
-      inputLockEl.textContent = controlLabel;
-    }
-
-    showEl(controlBadgeEl, true);
-    if (controlBadgeEl) {
-      controlBadgeEl.classList.toggle('host', controlReason === 'host');
-      controlBadgeEl.classList.toggle('manual', controlReason !== 'host');
-      controlBadgeEl.textContent = controlLabel;
-    }
-
-    statusEl.className = 'status waiting';
-    statusEl.textContent = controlLabel;
-    pressedKeys.clear();
-    latestNorm = null;
-    if (cursorEl) cursorEl.style.opacity = '0';
-  }
-  updateMeta();
 }
 
 function sendInput(event) {
@@ -381,16 +412,29 @@ window.addEventListener('blur', () => {
   pressedKeys.clear();
 });
 
-window.ssRemote.onStatus(setStatus);
+window.ssRemote.onStatus(applySession);
+if (typeof window.ssRemote.onSession === 'function') {
+  window.ssRemote.onSession(applySession);
+}
 
+// input-state is also embedded in session/status from main; keep as fallback only
 window.ssRemote.onInputState((data) => {
-  setInputEnabled(data.enabled !== false && data.enabled !== 'false', data.message, data.reason);
+  const on = data.enabled !== false && data.enabled !== 'false';
+  applySession({
+    // Do not invent connection state — only paint lock chrome
+    inputEnabled: on,
+    inputReason: data.reason,
+    inputMessage: data.message,
+    state: on ? undefined : 'locked',
+    message: on ? undefined : data.message,
+    pairCode,
+    relayUrl,
+  });
 });
 
-// Pull cached state in case the first IPC event arrived before listeners bound
-if (typeof window.ssRemote.getInputState === 'function') {
-  window.ssRemote.getInputState().then((data) => {
-    if (data) setInputEnabled(data.enabled !== false && data.enabled !== 'false', data.message, data.reason);
+if (typeof window.ssRemote.getSession === 'function') {
+  window.ssRemote.getSession().then((data) => {
+    if (data) applySession(data);
   }).catch(() => {});
 }
 
