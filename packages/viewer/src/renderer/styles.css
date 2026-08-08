@@ -109,12 +109,12 @@ body {
   cursor: not-allowed;
 }
 
-/* Lock / host-priority chip — sits beside the Type button */
+/* Always-visible status chip beside the Type button */
 .lock-chip {
   flex-shrink: 0;
-  display: none;
+  display: inline-flex !important;
   align-items: center;
-  max-width: 320px;
+  max-width: 360px;
   padding: 5px 12px;
   border-radius: 5px;
   font-size: 12px;
@@ -123,13 +123,15 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border: 1px solid #e6b84d;
-  background: #5a4510;
-  color: #ffe9a8;
+  border: 1px solid #2a3a52;
+  background: #1a2436;
+  color: #c5d4ef;
 }
 
-.lock-chip.is-on {
-  display: inline-flex !important;
+.lock-chip.live {
+  border-color: #2f6b4f;
+  background: #143528;
+  color: #7ddeb0;
 }
 
 .lock-chip.host {
@@ -142,6 +144,18 @@ body {
   border-color: #3d9cf0;
   background: #0f3558;
   color: #d6ebff;
+}
+
+.lock-chip.wait {
+  border-color: #6b5a2f;
+  background: #2a2418;
+  color: #e6b84d;
+}
+
+.lock-chip.error {
+  border-color: #8b3a40;
+  background: #3a181c;
+  color: #f07178;
 }
 
 .stage {

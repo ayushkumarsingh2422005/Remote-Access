@@ -123,34 +123,36 @@ function pushSession() {
 }
 
 function paintLockChip(status) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const locked = status && status.inputEnabled === false;
-  const payload = {
-    locked,
-    text: locked
-      ? status.inputMessage ||
-        status.message ||
-        (status.inputReason === 'host'
-          ? 'Host is using this PC'
-          : 'Keyboard & Mouse disabled')
-      : '',
-    reason: locked && status.inputReason === 'host' ? 'host' : 'manual',
-  };
+  if (!mainWindow || mainWindow.isDestroyed() || !status) return;
+
+  let mode = 'wait';
+  let text = status.message || 'Connecting…';
+
+  if (status.state === 'error' || status.state === 'disconnected') {
+    mode = 'error';
+    text = status.message || status.state;
+  } else if (status.inputEnabled === false) {
+    mode = status.inputReason === 'host' ? 'host' : 'manual';
+    text =
+      status.inputMessage ||
+      status.message ||
+      (mode === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled');
+  } else if (status.state === 'ready' || (status.hostPresent && status.connection === 'connected')) {
+    mode = 'live';
+    text = 'Live — full control';
+  } else if (status.state === 'connected' || status.state === 'waiting' || status.state === 'connecting') {
+    mode = 'wait';
+    text = status.message || 'Waiting for host…';
+  }
+
+  const payload = { mode, text };
   const js = `(() => {
     const p = ${JSON.stringify(payload)};
     const el = document.getElementById('lock-chip');
     if (!el) return;
-    if (p.locked) {
-      el.textContent = p.text;
-      el.className = 'lock-chip is-on ' + p.reason;
-      el.style.display = 'inline-flex';
-      const st = document.getElementById('status');
-      if (st) { st.textContent = p.text; st.className = 'status waiting'; }
-    } else {
-      el.textContent = '';
-      el.className = 'lock-chip';
-      el.style.display = 'none';
-    }
+    el.textContent = p.text;
+    el.className = 'lock-chip ' + p.mode;
+    el.style.display = 'inline-flex';
   })();`;
   mainWindow.webContents.executeJavaScript(js, true).catch(() => {});
 }

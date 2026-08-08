@@ -4,7 +4,6 @@ const placeholder = document.getElementById('placeholder');
 const viewport = document.getElementById('viewport');
 const cursorEl = document.getElementById('cursor');
 const lockChipEl = document.getElementById('lock-chip');
-const statusEl = document.getElementById('status');
 const metaPairEl = document.getElementById('meta-pair');
 const metaRestEl = document.getElementById('meta-rest');
 const btnType = document.getElementById('btn-type');
@@ -24,6 +23,7 @@ let pendingFrame = null;
 let inputEnabled = true;
 let controlLabel = '';
 let controlReason = '';
+let lastSessionState = 'connecting';
 const MOVE_INTERVAL_MS = 16;
 
 function shortRelay(url) {
@@ -52,28 +52,20 @@ function updateMeta() {
   }
 }
 
-/** Paint lock chip beside the Type button — always use inline display. */
-function paintLockChip(locked, label, reason) {
+/** Always-visible status chip right beside the Type button */
+function paintStatusChip(mode, text) {
   if (!lockChipEl) return;
-  if (locked) {
-    lockChipEl.textContent = label || 'Input disabled';
-    lockChipEl.className = `lock-chip is-on ${reason === 'host' ? 'host' : 'manual'}`;
-    lockChipEl.style.display = 'inline-flex';
-  } else {
-    lockChipEl.textContent = '';
-    lockChipEl.className = 'lock-chip';
-    lockChipEl.style.display = 'none';
-  }
+  lockChipEl.textContent = text || '';
+  lockChipEl.className = `lock-chip ${mode || 'wait'}`;
+  lockChipEl.style.display = 'inline-flex';
 }
 
-/**
- * Apply authoritative session from main process.
- */
 function applySession(data) {
   if (!data || typeof data !== 'object') return;
 
   if (data.pairCode) pairCode = data.pairCode;
   if (data.relayUrl) relayUrl = data.relayUrl;
+  if (data.state) lastSessionState = data.state;
 
   const hasInputFields =
     typeof data.inputEnabled === 'boolean' ||
@@ -107,25 +99,22 @@ function applySession(data) {
   }
 
   if (viewport) viewport.classList.toggle('input-disabled', !inputEnabled);
-  paintLockChip(!inputEnabled, controlLabel, controlReason);
 
   if (!inputEnabled) {
-    statusEl.className = 'status waiting';
-    statusEl.textContent = controlLabel || 'Input disabled';
-  } else if (data.state) {
-    const state = data.state;
-    statusEl.className = `status ${state === 'locked' ? 'waiting' : state}`;
-    statusEl.textContent =
-      data.message ||
-      ({
-        connecting: 'Connecting to relay…',
-        connected: 'Connected — waiting for host…',
-        waiting: 'Waiting for host…',
-        ready: 'Live — you have full control',
-        locked: controlLabel || 'Input disabled',
-        disconnected: 'Disconnected',
-        error: data.message || 'Error',
-      }[state] || state);
+    paintStatusChip(
+      controlReason === 'host' ? 'host' : 'manual',
+      controlLabel || 'Input disabled'
+    );
+  } else if (data.state === 'ready' || (data.hostPresent && inputEnabled && lastSessionState === 'ready')) {
+    paintStatusChip('live', 'Live — full control');
+  } else if (data.state === 'error' || data.state === 'disconnected') {
+    paintStatusChip('error', data.message || data.state);
+  } else if (data.state === 'connecting' || data.state === 'connected' || data.state === 'waiting') {
+    paintStatusChip('wait', data.message || 'Waiting for host…');
+  } else if (data.hostPresent && inputEnabled) {
+    paintStatusChip('live', 'Live — full control');
+  } else if (data.message) {
+    paintStatusChip('wait', data.message);
   }
 
   if (!inputEnabled) {
@@ -145,12 +134,13 @@ function setStatus(data) {
 function setInputEnabled(enabled, message, reason) {
   const on = enabled !== false && enabled !== 'false';
   applySession({
-    state: on ? undefined : 'locked',
+    state: on ? 'ready' : 'locked',
     inputEnabled: on,
     inputReason: reason,
     inputMessage: message,
+    hostPresent: true,
     message: on
-      ? undefined
+      ? 'Live — full control'
       : message || (reason === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled'),
     pairCode,
     relayUrl,
