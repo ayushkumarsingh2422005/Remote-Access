@@ -145,11 +145,12 @@ function connectRelay() {
     // Binary JPEG frames (faster / smaller than JSON base64)
     if (isBinary || isBinaryFrame(raw)) {
       const frame = decodeFrameBinary(raw);
-      if (!frame) return;
+      if (!frame || !frame.jpeg || frame.jpeg.length < 2) return;
       queueFrameToRenderer({
         width: frame.width,
         height: frame.height,
-        jpeg: frame.jpeg,
+        // Copy so IPC gets a standalone Buffer (subarray views can serialize oddly)
+        jpeg: Buffer.from(frame.jpeg),
       });
       return;
     }

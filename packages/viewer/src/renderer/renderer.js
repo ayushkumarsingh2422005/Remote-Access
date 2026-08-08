@@ -325,7 +325,8 @@ window.ssRemote.onInputState((data) => {
 });
 
 window.ssRemote.onFrame((frame) => {
-  if (!frame || !frame.data) {
+  const hasImage = frame && (frame.jpeg || frame.data);
+  if (!hasImage) {
     viewport.hidden = true;
     placeholder.hidden = false;
     pendingFrame = null;
