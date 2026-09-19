@@ -16,6 +16,7 @@ const {
   encodeMessage,
   decodeMessage,
   encodeFrameBinary,
+  isAllowedRemoteInput,
   LOG_PATH,
   ensureAppDir,
 } = require('@ss-remote/shared');
@@ -99,7 +100,6 @@ const KEY_MAP = {
   Backspace: Key.Backspace,
   Tab: Key.Tab,
   Enter: Key.Enter,
-  Escape: Key.Escape,
   Space: Key.Space,
   ' ': Key.Space,
   ArrowLeft: Key.Left,
@@ -109,26 +109,7 @@ const KEY_MAP = {
   Delete: Key.Delete,
   Home: Key.Home,
   End: Key.End,
-  PageUp: Key.PageUp,
-  PageDown: Key.PageDown,
-  Insert: Key.Insert,
   Shift: Key.LeftShift,
-  Control: Key.LeftControl,
-  Alt: Key.LeftAlt,
-  Meta: Key.LeftSuper,
-  CapsLock: Key.CapsLock,
-  F1: Key.F1,
-  F2: Key.F2,
-  F3: Key.F3,
-  F4: Key.F4,
-  F5: Key.F5,
-  F6: Key.F6,
-  F7: Key.F7,
-  F8: Key.F8,
-  F9: Key.F9,
-  F10: Key.F10,
-  F11: Key.F11,
-  F12: Key.F12,
 };
 
 function resolveKey(name, code) {
@@ -455,7 +436,11 @@ let typingGeneration = 0;
 async function applyInput(event) {
   if (!event || !event.action) return;
 
-  // Releases must always run — otherwise Ctrl/Shift/mouse stay stuck after lock
+  // Only typing + mouse move + left/right click reach the host.
+  // Releases of previously allowed keys still run so Shift/mouse cannot stick.
+  if (!isAllowedRemoteInput(event)) return;
+
+  // Releases must always run — otherwise Shift/mouse stay stuck after lock
   const isRelease = isReleaseEvent(event);
   if (!isInputEnabled() && !isRelease) return;
 
@@ -496,12 +481,7 @@ async function applyInput(event) {
     if (event.action === 'mousedown' || event.action === 'mouseup') {
       const { x, y } = toNativeCoords(event);
       pendingMove = null;
-      const btn =
-        event.button === 2
-          ? Button.RIGHT
-          : event.button === 1
-            ? Button.MIDDLE
-            : Button.LEFT;
+      const btn = event.button === 2 ? Button.RIGHT : Button.LEFT;
 
       if (event.action === 'mousedown') {
         if (!isInputEnabled()) return;
@@ -530,20 +510,6 @@ async function applyInput(event) {
         downButtons.delete(btn);
         noteRemoteInject();
       }
-      return;
-    }
-
-    if (event.action === 'scroll') {
-      if (!isInputEnabled()) return;
-      noteRemoteInject();
-      // Cap scroll amount to avoid inject storms
-      const amount = Math.max(
-        1,
-        Math.min(6, Math.round(Math.abs(event.dy || event.deltaY || 1) / 40))
-      );
-      if ((event.dy || event.deltaY || 0) < 0) await mouse.scrollUp(amount);
-      else await mouse.scrollDown(amount);
-      noteRemoteInject();
       return;
     }
 
@@ -819,6 +785,7 @@ function connect() {
     }
 
     if (msg.type === MessageType.INPUT && msg.event) {
+      if (!isAllowedRemoteInput(msg.event)) return;
       // Moves bypass queue (coalesced); everything else is serialized
       if (msg.event.action === 'mousemove') {
         if (!isInputEnabled()) return;

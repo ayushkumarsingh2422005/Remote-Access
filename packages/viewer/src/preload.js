@@ -1,6 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const {
+  isAllowedRemoteInput,
+  isAllowedRemoteKeyEvent,
+  shouldKeepKeyLocal,
+} = require('@ss-remote/shared');
 
 contextBridge.exposeInMainWorld('ssRemote', {
+  isAllowedRemoteInput,
+  isAllowedRemoteKeyEvent,
+  shouldKeepKeyLocal,
   onStatus: (cb) => {
     const handler = (_e, data) => cb(data);
     ipcRenderer.on('status', handler);

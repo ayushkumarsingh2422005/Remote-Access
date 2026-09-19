@@ -9,6 +9,7 @@ const {
   decodeMessage,
   isBinaryFrame,
   decodeFrameBinary,
+  isAllowedRemoteInput,
 } = require('@ss-remote/shared');
 
 let mainWindow = null;
@@ -95,7 +96,7 @@ function deriveStatusPayload() {
   return {
     ...base,
     state: 'ready',
-    message: 'Live — you have full control',
+    message: 'Live — typing and mouse',
   };
 }
 
@@ -143,7 +144,7 @@ function paintControlChip(status) {
       (mode === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled');
   } else if (status.state === 'ready') {
     mode = 'live';
-    text = 'Live — full control';
+    text = 'Live — typing and mouse';
   } else if (
     status.state === 'connected' ||
     status.state === 'waiting' ||
@@ -416,6 +417,7 @@ function connectRelay() {
 
 ipcMain.on('input', (_event, inputEvent) => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!isAllowedRemoteInput(inputEvent)) return;
   const isRelease =
     inputEvent &&
     (inputEvent.action === 'keyup' || inputEvent.action === 'mouseup');

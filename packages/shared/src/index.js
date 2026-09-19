@@ -116,6 +116,13 @@ function decodeFrameBinary(data) {
   };
 }
 
+const {
+  isAllowedRemoteInput,
+  isAllowedRemoteKeyEvent,
+  isAllowedRemoteMouseEvent,
+  shouldKeepKeyLocal,
+} = require('./input-filter');
+
 module.exports = {
   APP_DIR,
   CONFIG_PATH,
@@ -136,4 +143,8 @@ module.exports = {
   isBinaryFrame,
   encodeFrameBinary,
   decodeFrameBinary,
+  isAllowedRemoteInput,
+  isAllowedRemoteKeyEvent,
+  isAllowedRemoteMouseEvent,
+  shouldKeepKeyLocal,
 };

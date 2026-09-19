@@ -127,7 +127,7 @@ function setInputEnabled(enabled, message, reason) {
     inputMessage: message,
     hostPresent: true,
     message: on
-      ? 'Live — full control'
+      ? 'Live — typing and mouse'
       : message || (reason === 'host' ? 'Host is using this PC' : 'Keyboard & Mouse disabled'),
     pairCode,
     relayUrl,
@@ -204,8 +204,18 @@ function updateLocalCursor(clientX, clientY) {
   cursorEl.style.transform = `translate(${x}px, ${y}px)`;
 }
 
-function isMod(e) {
-  return e.ctrlKey || e.metaKey;
+function isRemoteKeyAllowed(e) {
+  if (typeof window.ssRemote.isAllowedRemoteKeyEvent === 'function') {
+    return window.ssRemote.isAllowedRemoteKeyEvent({
+      key: e.key,
+      code: e.code,
+      ctrlKey: e.ctrlKey,
+      altKey: e.altKey,
+      shiftKey: e.shiftKey,
+      metaKey: e.metaKey,
+    });
+  }
+  return true;
 }
 
 function base64ToUint8Array(b64) {
@@ -306,48 +316,25 @@ canvas.addEventListener('mousedown', (e) => {
   e.preventDefault();
   canvas.focus();
   flushMove();
+  if (e.button !== 0 && e.button !== 2) return;
   const { x, y, nx, ny } = mapCoords(e.clientX, e.clientY);
   sendInput({ action: 'mousedown', x, y, nx, ny, button: e.button });
 });
 
 canvas.addEventListener('mouseup', (e) => {
   e.preventDefault();
+  if (e.button !== 0 && e.button !== 2) return;
   const { x, y, nx, ny } = mapCoords(e.clientX, e.clientY);
   sendInput({ action: 'mouseup', x, y, nx, ny, button: e.button });
 });
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-let lastScrollAt = 0;
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  if (!inputEnabled) return;
-  const now = Date.now();
-  if (now - lastScrollAt < 30) return; // throttle scroll storms
-  lastScrollAt = now;
-  sendInput({ action: 'scroll', dy: e.deltaY, deltaY: e.deltaY });
-}, { passive: false });
-
-async function handlePasteShortcut(e) {
-  if (!inputEnabled) {
-    e.preventDefault();
-    return;
-  }
-  e.preventDefault();
-  const text = await window.ssRemote.readClipboard();
-  window.ssRemote.sendClipboardToHost(text || '');
-  setTimeout(() => {
-    sendInput({ action: 'paste-text', text: text || '' });
-  }, 80);
-}
-
-window.addEventListener('keydown', async (e) => {
+window.addEventListener('keydown', (e) => {
   if (document.activeElement !== canvas) return;
 
-  if (isMod(e) && (e.key === 'v' || e.key === 'V') && !e.altKey && !e.shiftKey) {
-    await handlePasteShortcut(e);
-    return;
-  }
+  // Win, Print Screen, Escape, Ctrl+V, Alt, F-keys, etc. stay on this PC
+  if (!isRemoteKeyAllowed(e)) return;
 
   e.preventDefault();
   if (pressedKeys.has(e.code)) return;
@@ -356,26 +343,26 @@ window.addEventListener('keydown', async (e) => {
     action: 'keydown',
     key: e.key,
     code: e.code,
-    ctrl: e.ctrlKey,
-    alt: e.altKey,
+    ctrl: false,
+    alt: false,
     shift: e.shiftKey,
-    meta: e.metaKey,
+    meta: false,
   });
 });
 
 window.addEventListener('keyup', (e) => {
   if (document.activeElement !== canvas && !pressedKeys.has(e.code)) return;
-  if (isMod(e) && (e.key === 'v' || e.key === 'V')) {
+  if (pressedKeys.has(e.code)) {
+    e.preventDefault();
     pressedKeys.delete(e.code);
+    sendInput({
+      action: 'keyup',
+      key: e.key,
+      code: e.code,
+    });
     return;
   }
-  e.preventDefault();
-  pressedKeys.delete(e.code);
-  sendInput({
-    action: 'keyup',
-    key: e.key,
-    code: e.code,
-  });
+  if (!isRemoteKeyAllowed(e)) return;
 });
 
 window.addEventListener('blur', () => {

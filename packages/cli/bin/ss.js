@@ -256,7 +256,14 @@ Usage:
 
 Typical (India ↔ US, no VPS):
   Host:       ss start all     → copy the public link
-  Friend:     ss connect <url> → opens viewer and takes control
+  Friend:     ss connect <url> → opens viewer (typing + mouse)
+
+Controller sends only:
+  typing (letters, digits, punctuation, Shift, Backspace, Enter, arrows)
+  mouse movement, left click, right click
+  the Type box
+
+Win, Print Screen, Escape, Ctrl+V, Alt, Ctrl, F-keys, scroll, and middle-click stay on the controller PC.
 
 Connection modes (SS_TUNNEL env):
   localtunnel   default free tunnel
