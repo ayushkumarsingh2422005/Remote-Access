@@ -1,9 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
 const {
   isAllowedRemoteInput,
   isAllowedRemoteKeyEvent,
   shouldKeepKeyLocal,
-} = require('@ss-remote/shared');
+} = require(path.join(__dirname, '..', '..', 'shared', 'src', 'input-filter.js'));
 
 contextBridge.exposeInMainWorld('ssRemote', {
   isAllowedRemoteInput,
