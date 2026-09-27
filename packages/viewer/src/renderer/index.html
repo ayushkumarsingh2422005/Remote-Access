@@ -18,6 +18,7 @@
       <span id="meta-rest"></span>
     </div>
   </header>
+  <div class="workspace">
   <main class="stage">
     <div id="placeholder" class="placeholder">
       <p>Waiting for the host to share its screen.</p>
@@ -28,6 +29,15 @@
       <div id="cursor" class="remote-cursor" aria-hidden="true"></div>
     </div>
   </main>
+  <aside id="host-notes" class="host-notes" hidden>
+    <div class="host-notes-head">
+      Incoming from host
+      <span id="host-notes-mode" class="host-notes-mode" hidden>Caps Lock</span>
+    </div>
+    <div id="host-notes-log" class="host-notes-log"></div>
+    <div id="host-notes-draft" class="host-notes-draft"></div>
+  </aside>
+  </div>
 
   <div id="type-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close="1"></div>

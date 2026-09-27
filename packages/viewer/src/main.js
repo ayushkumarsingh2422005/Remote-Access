@@ -392,6 +392,14 @@ function connectRelay() {
       applyInputState(msg);
     }
 
+    if (msg.type === MessageType.HOST_NOTE) {
+      sendToRenderer('host-note', {
+        active: !!msg.active,
+        text: typeof msg.text === 'string' ? msg.text : '',
+        lines: Array.isArray(msg.lines) ? msg.lines : [],
+      });
+    }
+
     if (msg.type === MessageType.ERROR) {
       setConnection('error', msg.error || 'Error');
     }

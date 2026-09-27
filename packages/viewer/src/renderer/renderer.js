@@ -495,3 +495,29 @@ typeSend.addEventListener('click', () => {
   typeStatus.className = 'type-status ok';
   typeText.value = '';
 });
+
+const hostNotesEl = document.getElementById('host-notes');
+const hostNotesLog = document.getElementById('host-notes-log');
+const hostNotesDraft = document.getElementById('host-notes-draft');
+const hostNotesMode = document.getElementById('host-notes-mode');
+
+function renderHostNotes(data) {
+  if (!hostNotesEl || !data) return;
+  const lines = Array.isArray(data.lines) ? data.lines : [];
+  const text = typeof data.text === 'string' ? data.text : '';
+  const active = !!data.active;
+  const hasContent = active || text || lines.some((l) => String(l || '').length);
+  hostNotesEl.hidden = !hasContent;
+  if (hostNotesMode) hostNotesMode.hidden = !active;
+  if (hostNotesLog) {
+    hostNotesLog.textContent = lines.filter((l) => String(l).length).join('\n');
+  }
+  if (hostNotesDraft) {
+    hostNotesDraft.textContent = text;
+  }
+  if (hostNotesLog) hostNotesLog.scrollTop = hostNotesLog.scrollHeight;
+}
+
+if (typeof window.ssRemote.onHostNote === 'function') {
+  window.ssRemote.onHostNote(renderHostNotes);
+}

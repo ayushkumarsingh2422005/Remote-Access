@@ -18,11 +18,17 @@
 html,
 body {
   height: 100%;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--text);
   font-family: "Segoe UI", "IBM Plex Sans", sans-serif;
   overflow: hidden;
   user-select: none;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .bar {
@@ -158,8 +164,16 @@ body {
   color: #f07178;
 }
 
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .stage {
-  height: calc(100% - 40px);
+  flex: 1;
+  height: auto;
+  min-width: 0;
   display: grid;
   place-items: center;
   background:
@@ -387,4 +401,69 @@ code {
   opacity: 0.5;
   cursor: not-allowed;
   filter: none;
+}
+
+.host-notes {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid #243042;
+  background: #121824;
+}
+
+.host-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c5d4ef;
+  border-bottom: 1px solid #243042;
+}
+
+.host-notes-mode {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffe9a8;
+  background: #5a4510;
+  border: 1px solid #e6b84d;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.host-notes-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.host-notes-draft {
+  min-height: 2.2em;
+  padding: 10px 12px 12px;
+  border-top: 1px solid #243042;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #7ddeb0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.host-notes-draft:empty::before {
+  content: "Host is typing…";
+  color: var(--muted);
+  font-style: italic;
 }

@@ -76,7 +76,7 @@ function modsToFlags(parsed) {
   return flags;
 }
 
-function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostActivity, log }) {
+function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostActivity, onHostNote, noteFlagPath, log }) {
   const lock = parseShortcut(lockSpec);
   const unlock = parseShortcut(unlockSpec);
   const lockVk = keyToVk(lock.key);
@@ -108,6 +108,7 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       String(lockVk),
       String(unlockMods),
       String(unlockVk),
+      ...(noteFlagPath ? ['-NoteFlagPath', noteFlagPath] : []),
     ],
     {
       windowsHide: true,
@@ -123,6 +124,26 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
     if (msg === 'READY') return;
     if (msg === 'HOST_ACTIVITY') {
       if (typeof onHostActivity === 'function') onHostActivity();
+      return;
+    }
+    if (msg === 'HOST_NOTE_BS') {
+      if (typeof onHostNote === 'function') onHostNote({ action: 'backspace' });
+      return;
+    }
+    if (msg === 'HOST_NOTE_ENTER') {
+      if (typeof onHostNote === 'function') onHostNote({ action: 'enter' });
+      return;
+    }
+    if (msg === 'HOST_NOTE_MODE on' || msg === 'HOST_NOTE_MODE off') {
+      if (typeof onHostNote === 'function') {
+        onHostNote({ action: 'mode', on: msg.endsWith('on') });
+      }
+      return;
+    }
+    if (msg.startsWith('HOST_NOTE_CHAR:')) {
+      if (typeof onHostNote === 'function') {
+        onHostNote({ action: 'char', ch: msg.slice('HOST_NOTE_CHAR:'.length) });
+      }
       return;
     }
     const now = Date.now();

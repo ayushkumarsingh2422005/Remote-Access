@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory = $true)][int]$LockMods,
   [Parameter(Mandatory = $true)][int]$LockVk,
   [Parameter(Mandatory = $true)][int]$UnlockMods,
-  [Parameter(Mandatory = $true)][int]$UnlockVk
+  [Parameter(Mandatory = $true)][int]$UnlockVk,
+  [Parameter(Mandatory = $false)][string]$NoteFlagPath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,7 +13,9 @@ $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public struct MSG {
   public IntPtr hwnd;
@@ -53,7 +56,9 @@ public static class SsHostWatch {
   public const int WH_KEYBOARD_LL = 13;
   public const int WH_MOUSE_LL = 14;
   public const int WM_KEYDOWN = 0x0100;
+  public const int WM_KEYUP = 0x0101;
   public const int WM_SYSKEYDOWN = 0x0104;
+  public const int WM_SYSKEYUP = 0x0105;
   public const int WM_LBUTTONDOWN = 0x0201;
   public const int WM_RBUTTONDOWN = 0x0204;
   public const int WM_MBUTTONDOWN = 0x0207;
@@ -67,8 +72,18 @@ public static class SsHostWatch {
   public const int VK_CONTROL = 0x11;
   public const int VK_MENU = 0x12; // Alt
   public const int VK_SHIFT = 0x10;
+  public const int VK_CAPITAL = 0x14;
+  public const int VK_BACK = 0x08;
+  public const int VK_TAB = 0x09;
+  public const int VK_RETURN = 0x0D;
   public const int VK_LWIN = 0x5B;
   public const int VK_RWIN = 0x5C;
+  public const int VK_LSHIFT = 0xA0;
+  public const int VK_RSHIFT = 0xA1;
+  public const int VK_LCONTROL = 0xA2;
+  public const int VK_RCONTROL = 0xA3;
+  public const int VK_LMENU = 0xA4;
+  public const int VK_RMENU = 0xA5;
 
   public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -102,6 +117,16 @@ public static class SsHostWatch {
   [DllImport("user32.dll")]
   public static extern short GetAsyncKeyState(int vKey);
 
+  [DllImport("user32.dll")]
+  public static extern short GetKeyState(int nVirtKey);
+
+  [DllImport("user32.dll")]
+  public static extern bool GetKeyboardState(byte[] lpKeyState);
+
+  [DllImport("user32.dll")]
+  public static extern int ToUnicode(uint wVirtKey, uint wScanCode, byte[] lpKeyState,
+    [Out] StringBuilder pwszBuff, int cchBuff, uint wFlags);
+
   public static IntPtr keyboardHook = IntPtr.Zero;
   public static IntPtr mouseHook = IntPtr.Zero;
   public static HookProc kbProc;
@@ -120,6 +145,9 @@ public static class SsHostWatch {
   public static bool unlockNeedAlt = true;
   public static bool unlockNeedShift = false;
   public static bool unlockNeedWin = false;
+  public static string flagPath = "";
+  public static bool captureEnabled = false;
+  public static long lastFlagCheck = 0;
 
   public static void Emit(string line) {
     Console.WriteLine(line);
@@ -156,23 +184,83 @@ public static class SsHostWatch {
     return ctrl == needCtrl && alt == needAlt && shift == needShift && win == needWin;
   }
 
+  public static bool CapsOn() {
+    return (GetKeyState(VK_CAPITAL) & 1) != 0;
+  }
+
+  public static bool NoteCaptureOn() {
+    if (string.IsNullOrEmpty(flagPath)) return false;
+    long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    if (now - lastFlagCheck > 350) {
+      lastFlagCheck = now;
+      try {
+        captureEnabled = File.Exists(flagPath) && File.ReadAllText(flagPath).Trim() == "1";
+      } catch {
+        captureEnabled = false;
+      }
+    }
+    return captureEnabled;
+  }
+
+  public static bool IsPassThroughVk(uint vk) {
+    return vk == VK_CAPITAL
+      || vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT
+      || vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL
+      || vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU
+      || vk == VK_LWIN || vk == VK_RWIN;
+  }
+
+  public static string VkToChar(uint vk, uint scan) {
+    byte[] state = new byte[256];
+    GetKeyboardState(state);
+    // Caps Lock is the secret-note mode, not a case shift — Shift still uppercases.
+    state[VK_CAPITAL] = 0;
+    StringBuilder sb = new StringBuilder(8);
+    int rc = ToUnicode(vk, scan, state, sb, sb.Capacity, 0);
+    if (rc > 0) return sb.ToString();
+    return "";
+  }
+
   public static IntPtr KeyboardCallback(int nCode, IntPtr wParam, IntPtr lParam) {
     if (nCode >= 0) {
       int msg = wParam.ToInt32();
-      if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+      bool isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+      bool isUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+      if (isDown || isUp) {
         KBDLLHOOKSTRUCT hs = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
         bool injected = (hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0;
         if (!injected) {
-          // Fallback hotkeys via LL hook — more reliable than RegisterHotKey alone
-          if (hs.vkCode == unlockVk &&
-              ModsMatch(unlockNeedCtrl, unlockNeedAlt, unlockNeedShift, unlockNeedWin)) {
-            EmitHotkey("UNLOCK");
-            // Do not treat unlock chord as "host using PC"
-          } else if (hs.vkCode == lockVk &&
-              ModsMatch(lockNeedCtrl, lockNeedAlt, lockNeedShift, lockNeedWin)) {
-            EmitHotkey("LOCK");
-          } else {
-            EmitActivity();
+          if (hs.vkCode == VK_CAPITAL && isUp) {
+            Emit(CapsOn() ? "HOST_NOTE_MODE on" : "HOST_NOTE_MODE off");
+          }
+
+          bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;
+          if (noteMode && !IsPassThroughVk(hs.vkCode)) {
+            if (isDown) {
+              if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
+              else if (hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
+              else if (hs.vkCode == VK_TAB) Emit("HOST_NOTE_CHAR:\t");
+              else {
+                string ch = VkToChar(hs.vkCode, hs.scanCode);
+                if (ch == "\r" || ch == "\n") Emit("HOST_NOTE_ENTER");
+                else if (!string.IsNullOrEmpty(ch) && ch[0] >= 32) {
+                  Emit("HOST_NOTE_CHAR:" + ch);
+                }
+              }
+            }
+            return (IntPtr)1;
+          }
+
+          if (isDown) {
+            if (hs.vkCode == unlockVk &&
+                ModsMatch(unlockNeedCtrl, unlockNeedAlt, unlockNeedShift, unlockNeedWin)) {
+              EmitHotkey("UNLOCK");
+            } else if (hs.vkCode == lockVk &&
+                ModsMatch(lockNeedCtrl, lockNeedAlt, lockNeedShift, lockNeedWin)) {
+              EmitHotkey("LOCK");
+            } else if (hs.vkCode != VK_CAPITAL) {
+              EmitActivity();
+            }
           }
         }
       }
@@ -233,6 +321,7 @@ function Test-ModFlag([int]$mods, [int]$flag) {
 [SsHostWatch]::unlockNeedCtrl = Test-ModFlag $UnlockMods 0x0002
 [SsHostWatch]::unlockNeedShift = Test-ModFlag $UnlockMods 0x0004
 [SsHostWatch]::unlockNeedWin = Test-ModFlag $UnlockMods 0x0008
+[SsHostWatch]::flagPath = $NoteFlagPath
 
 $lockId = 1
 $unlockId = 2

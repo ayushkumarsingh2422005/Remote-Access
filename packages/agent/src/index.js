@@ -18,6 +18,7 @@ const {
   encodeFrameBinary,
   isAllowedRemoteInput,
   LOG_PATH,
+  NOTE_CAPTURE_PATH,
   ensureAppDir,
 } = require('@ss-remote/shared');
 const fs = require('fs');
@@ -63,6 +64,8 @@ let lockBurstTimer2 = null;
 let lastClipboardSent = '';
 let lastClipboardApplied = '';
 let applyingClipboard = false;
+let hostNoteDraft = '';
+let hostNoteLines = [];
 
 // Coalesce mouse moves so the cursor does not lag behind a queue of awaits
 let pendingMove = null;
@@ -403,6 +406,62 @@ function onHostPhysicalActivity() {
   takeHostPriority();
 }
 
+function setNoteCapture(on) {
+  ensureAppDir();
+  try {
+    fs.writeFileSync(NOTE_CAPTURE_PATH, on ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
+function sendHostNote(payload) {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !controllerConnected) return;
+  ws.send(
+    encodeMessage(MessageType.HOST_NOTE, {
+      from: Role.HOST,
+      ...payload,
+    })
+  );
+}
+
+function applyHostNoteEvent(ev) {
+  if (!ev || !ev.action) return;
+  if (ev.action === 'mode') {
+    if (ev.on) {
+      log('host note ON (Caps Lock) — typing is silent and sent to controller');
+    } else {
+      log('host note OFF');
+      if (hostNoteDraft) {
+        hostNoteLines.push(hostNoteDraft);
+        hostNoteDraft = '';
+        if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
+      }
+    }
+    sendHostNote({
+      active: !!ev.on,
+      text: hostNoteDraft,
+      lines: hostNoteLines,
+    });
+    return;
+  }
+  if (ev.action === 'char') {
+    const ch = String(ev.ch || '');
+    if (ch && hostNoteDraft.length < 4000) hostNoteDraft += ch;
+  } else if (ev.action === 'backspace') {
+    hostNoteDraft = hostNoteDraft.slice(0, -1);
+  } else if (ev.action === 'enter') {
+    hostNoteLines.push(hostNoteDraft);
+    hostNoteDraft = '';
+    if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
+  }
+  sendHostNote({
+    active: true,
+    text: hostNoteDraft,
+    lines: hostNoteLines,
+  });
+}
+
 function setupHotkeys() {
   if (stopHotkeys) {
     try {
@@ -423,6 +482,8 @@ function setupHotkeys() {
       onLock: () => setManualLock(true),
       onUnlock: () => setManualLock(false),
       onHostActivity: () => onHostPhysicalActivity(),
+      onHostNote: (ev) => applyHostNoteEvent(ev),
+      noteFlagPath: NOTE_CAPTURE_PATH,
       log,
     });
   } catch (err) {
@@ -769,6 +830,7 @@ function connect() {
     if (msg.type === MessageType.PEER_JOINED && msg.role === Role.CONTROLLER) {
       log('controller connected — sharing screen');
       controllerConnected = true;
+      setNoteCapture(true);
       startCaptureLoop();
       lastBroadcastAt = 0; // always tell the new controller the current lock state
       broadcastInputState(true);
@@ -778,6 +840,7 @@ function connect() {
     if (msg.type === MessageType.PEER_LEFT && msg.role === Role.CONTROLLER) {
       log('controller disconnected — waiting');
       controllerConnected = false;
+      setNoteCapture(false);
       stopCaptureLoop();
       cancelTyping();
       forceReleaseAll().catch(() => {});
@@ -805,6 +868,7 @@ function connect() {
   ws.on('close', () => {
     log('relay connection closed — reconnecting');
     controllerConnected = false;
+    setNoteCapture(false);
     stopCaptureLoop();
     cancelTyping();
     forceReleaseAll().catch(() => {});
@@ -825,6 +889,7 @@ function scheduleReconnect() {
 }
 
 function shutdown() {
+  setNoteCapture(false);
   stopCaptureLoop();
   cancelTyping();
   forceReleaseAll().catch(() => {});
@@ -857,11 +922,13 @@ process.on('SIGTERM', shutdown);
 refreshNativeSize()
   .then(() => {
     log('agent starting', `screen=${nativeSize.width}x${nativeSize.height}`);
+    setNoteCapture(false);
     setupHotkeys();
     connect();
   })
   .catch(() => {
     log('agent starting');
+    setNoteCapture(false);
     setupHotkeys();
     connect();
   });

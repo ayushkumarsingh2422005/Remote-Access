@@ -9,6 +9,7 @@ const RELAY_PID_PATH = path.join(APP_DIR, 'relay.pid');
 const TUNNEL_PID_PATH = path.join(APP_DIR, 'tunnel.pid');
 const CONNECTION_PATH = path.join(APP_DIR, 'connection.json');
 const LOG_PATH = path.join(APP_DIR, 'agent.log');
+const NOTE_CAPTURE_PATH = path.join(APP_DIR, 'note-capture.flag');
 
 const MessageType = {
   REGISTER: 'register',
@@ -20,6 +21,7 @@ const MessageType = {
   SCREEN_INFO: 'screen_info',
   CLIPBOARD: 'clipboard',
   INPUT_STATE: 'input_state',
+  HOST_NOTE: 'host_note',
   ERROR: 'error',
   PING: 'ping',
   PONG: 'pong',
@@ -131,6 +133,7 @@ module.exports = {
   TUNNEL_PID_PATH,
   CONNECTION_PATH,
   LOG_PATH,
+  NOTE_CAPTURE_PATH,
   MessageType,
   Role,
   DEFAULT_CONFIG,
