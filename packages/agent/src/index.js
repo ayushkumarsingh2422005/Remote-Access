@@ -429,9 +429,9 @@ function applyHostNoteEvent(ev) {
   if (!ev || !ev.action) return;
   if (ev.action === 'mode') {
     if (ev.on) {
-      log('host note ON (Caps Lock) — typing is silent and sent to controller');
+      log('Caps Lock ENABLED — host typing is silent and sent to the controller');
     } else {
-      log('host note OFF');
+      log('Caps Lock DISABLED — host typing is normal again');
       if (hostNoteDraft) {
         hostNoteLines.push(hostNoteDraft);
         hostNoteDraft = '';

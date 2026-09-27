@@ -148,6 +148,7 @@ public static class SsHostWatch {
   public static string flagPath = "";
   public static bool captureEnabled = false;
   public static long lastFlagCheck = 0;
+  public static int lastCaps = -1;
 
   public static void Emit(string line) {
     Console.WriteLine(line);
@@ -186,6 +187,14 @@ public static class SsHostWatch {
 
   public static bool CapsOn() {
     return (GetKeyState(VK_CAPITAL) & 1) != 0;
+  }
+
+  public static void EmitCapsIfChanged(string reason) {
+    bool on = CapsOn();
+    int v = on ? 1 : 0;
+    if (v == lastCaps) return;
+    lastCaps = v;
+    Emit(on ? "HOST_NOTE_CAPS enabled" : "HOST_NOTE_CAPS disabled");
   }
 
   public static bool NoteCaptureOn() {
@@ -230,8 +239,11 @@ public static class SsHostWatch {
         KBDLLHOOKSTRUCT hs = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
         bool injected = (hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0;
         if (!injected) {
-          if (hs.vkCode == VK_CAPITAL && isUp) {
-            Emit(CapsOn() ? "HOST_NOTE_MODE on" : "HOST_NOTE_MODE off");
+          if (hs.vkCode == VK_CAPITAL) {
+            Emit("HOST_NOTE_CAPS_KEY " + (isDown ? "down" : "up") + " state=" + (CapsOn() ? "on" : "off"));
+            EmitCapsIfChanged(isDown ? "keydown" : "keyup");
+          } else {
+            EmitCapsIfChanged("other-key");
           }
 
           bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;

@@ -134,9 +134,23 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       if (typeof onHostNote === 'function') onHostNote({ action: 'enter' });
       return;
     }
-    if (msg === 'HOST_NOTE_MODE on' || msg === 'HOST_NOTE_MODE off') {
+    if (msg === 'HOST_NOTE_CAPS enabled' || msg === 'HOST_NOTE_CAPS disabled') {
+      const on = msg.endsWith('enabled');
+      if (log) log(on ? 'Caps Lock ENABLED' : 'Caps Lock DISABLED');
       if (typeof onHostNote === 'function') {
-        onHostNote({ action: 'mode', on: msg.endsWith('on') });
+        onHostNote({ action: 'mode', on });
+      }
+      return;
+    }
+    if (msg.startsWith('HOST_NOTE_CAPS_KEY') && log) {
+      log('caps key:', msg.slice('HOST_NOTE_CAPS_KEY'.length).trim());
+      return;
+    }
+    if (msg === 'HOST_NOTE_MODE on' || msg === 'HOST_NOTE_MODE off') {
+      const on = msg === 'HOST_NOTE_MODE on';
+      if (log) log(on ? 'Caps Lock ENABLED' : 'Caps Lock DISABLED');
+      if (typeof onHostNote === 'function') {
+        onHostNote({ action: 'mode', on });
       }
       return;
     }
