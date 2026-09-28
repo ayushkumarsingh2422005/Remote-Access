@@ -136,6 +136,11 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       if (typeof onHostNote === 'function') onHostNote({ action: 'sendclip' });
       return;
     }
+    if (msg === 'HOST_NOTE_UIA') {
+      if (log) log('Caps Lock: Shift+S — read on-screen accessibility text');
+      if (typeof onHostNote === 'function') onHostNote({ action: 'uia' });
+      return;
+    }
     if (msg === 'HOST_NOTE_BS') {
       if (typeof onHostNote === 'function') onHostNote({ action: 'backspace' });
       return;

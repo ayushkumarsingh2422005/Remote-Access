@@ -253,11 +253,13 @@ public static class SsHostWatch {
               bool shift = Down(VK_SHIFT) || Down(VK_LSHIFT) || Down(VK_RSHIFT);
               bool alt = Down(VK_MENU) || Down(VK_LMENU) || Down(VK_RMENU);
               bool ctrl = Down(VK_CONTROL) || Down(VK_LCONTROL) || Down(VK_RCONTROL);
-              // Caps Lock mode: Shift+C copy selection, Shift+V send clipboard.
+              // Caps Lock mode: Shift+C copy, Shift+V clipboard, Shift+S accessibility text.
               if (shift && !alt && !ctrl && hs.vkCode == 0x43) {
                 Emit("HOST_NOTE_COPY");
               } else if (shift && !alt && !ctrl && hs.vkCode == 0x56) {
                 Emit("HOST_NOTE_SENDCLIP");
+              } else if (shift && !alt && !ctrl && hs.vkCode == 0x53) {
+                Emit("HOST_NOTE_UIA");
               } else if (alt || ctrl) {
                 // Swallow Alt/Ctrl chords — do not leak menu/control chars into notes.
               } else if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");

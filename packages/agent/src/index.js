@@ -22,6 +22,9 @@ const {
   ensureAppDir,
 } = require('@ss-remote/shared');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
 const { startHostHotkeys } = require('./hotkeys');
 const { typeMimic, cancelTyping } = require('./type-text');
 
@@ -438,6 +441,101 @@ function pushNoteLines(text) {
 
 let lastNoteCopyAt = 0;
 let lastNoteSendAt = 0;
+let lastNoteUiaAt = 0;
+let uiaReadBusy = false;
+
+function readUiAutomationText() {
+  const script = path.join(__dirname, 'win-uia-text.ps1');
+  const outPath = path.join(os.tmpdir(), `ss-uia-${process.pid}-${Date.now()}.txt`);
+  return new Promise((resolve) => {
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-STA',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        script,
+        '-OutPath',
+        outPath,
+      ],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    let stderr = '';
+    child.stderr.on('data', (buf) => {
+      stderr += buf.toString();
+    });
+    const timer = setTimeout(() => {
+      try {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } catch {
+        /* ignore */
+      }
+    }, 25000);
+    child.on('close', () => {
+      clearTimeout(timer);
+      let text = '';
+      try {
+        if (fs.existsSync(outPath)) text = fs.readFileSync(outPath, 'utf8');
+      } catch (err) {
+        log('Caps Lock Shift+S read file failed:', err.message);
+      }
+      try {
+        fs.unlinkSync(outPath);
+      } catch {
+        /* ignore */
+      }
+      if (!text && stderr.trim()) {
+        log('Caps Lock Shift+S UI Automation error:', stderr.trim().slice(0, 300));
+      }
+      resolve(text);
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      log('Caps Lock Shift+S failed to start:', err.message);
+      resolve('');
+    });
+  });
+}
+
+function pushHostNoteBubble(text, maxLen = 20000) {
+  const limit = Math.max(1, Number(maxLen) || 20000);
+  const clipped = text.length > limit ? text.slice(0, limit) : text;
+  if (hostNoteDraft) {
+    hostNoteLines.push(hostNoteDraft);
+    hostNoteDraft = '';
+  }
+  hostNoteLines.push(clipped);
+  if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
+  sendHostNote({
+    active: true,
+    text: hostNoteDraft,
+    lines: hostNoteLines,
+  });
+  return clipped.length;
+}
+
+async function sendHostUiTextNote() {
+  const now = Date.now();
+  if (uiaReadBusy || now - lastNoteUiaAt < 800) return;
+  lastNoteUiaAt = now;
+  uiaReadBusy = true;
+  try {
+    const text = String(await readUiAutomationText() || '').trim();
+    if (!text) {
+      log('Caps Lock Shift+S: no on-screen accessibility text');
+      return;
+    }
+    const n = pushHostNoteBubble(text, 100000);
+    log(`Caps Lock: sent on-screen accessibility text to controller (Shift+S) chars=${n}`);
+  } finally {
+    uiaReadBusy = false;
+  }
+}
 
 async function copyHostSelection() {
   const now = Date.now();
@@ -482,20 +580,8 @@ async function sendHostClipboardNote() {
     log('Caps Lock Shift+V: clipboard is empty');
     return;
   }
-  const clipped = text.length > 20000 ? text.slice(0, 20000) : text;
-  if (hostNoteDraft) {
-    hostNoteLines.push(hostNoteDraft);
-    hostNoteDraft = '';
-  }
-  // One chat bubble for the whole clipboard (keep internal newlines).
-  hostNoteLines.push(clipped);
-  if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
-  sendHostNote({
-    active: true,
-    text: hostNoteDraft,
-    lines: hostNoteLines,
-  });
-  log(`Caps Lock: sent clipboard to controller (Shift+V) chars=${clipped.length}`);
+  const n = pushHostNoteBubble(text);
+  log(`Caps Lock: sent clipboard to controller (Shift+V) chars=${n}`);
 }
 
 function applyHostNoteEvent(ev) {
@@ -506,6 +592,10 @@ function applyHostNoteEvent(ev) {
   }
   if (ev.action === 'sendclip') {
     sendHostClipboardNote().catch((err) => log('host note sendclip error:', err.message));
+    return;
+  }
+  if (ev.action === 'uia') {
+    sendHostUiTextNote().catch((err) => log('host note uia error:', err.message));
     return;
   }
   if (ev.action === 'mode') {

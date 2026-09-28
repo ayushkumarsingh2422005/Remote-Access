@@ -276,6 +276,7 @@ Host shortcuts (while agent is running):
   Caps Lock    Silent notes to the controller Incoming panel (Windows)
   Shift+C      In Caps Lock mode: copy selected host text
   Shift+V      In Caps Lock mode: send clipboard to the controller
+  Shift+S      In Caps Lock mode: send all on-screen accessibility text
 
 Config file: ${CONFIG_PATH}
 `.trim());

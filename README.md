@@ -68,5 +68,5 @@ ss config        View / set options
 
 - Agent runs hidden after `ss start all`
 - Capture starts when a controller connects
-- Host Caps Lock (Windows, controller connected): silent notes go to the viewer **Incoming from host** panel. `Shift+C` copies the host selection; `Shift+V` sends the clipboard there in one shot.
+- Host Caps Lock (Windows, controller connected): silent notes go to the viewer **Incoming from host** panel. `Shift+C` copies the host selection; `Shift+V` sends the clipboard there in one shot. `Shift+S` sends all on-screen text Windows exposes to accessibility (no copy command).
 - Intended for two trusted people only — protect your pair code and tunnel link
