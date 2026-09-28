@@ -149,6 +149,8 @@ public static class SsHostWatch {
   public static bool captureEnabled = false;
   public static long lastFlagCheck = 0;
   public static int lastCaps = -1;
+  public static bool altHeld = false;
+  public static bool ctrlHeld = false;
 
   public static void Emit(string line) {
     Console.WriteLine(line);
@@ -177,9 +179,36 @@ public static class SsHostWatch {
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
   }
 
+  static bool AnyAltDown() {
+    return Down(VK_MENU) || Down(VK_LMENU) || Down(VK_RMENU);
+  }
+
+  static bool AnyCtrlDown() {
+    return Down(VK_CONTROL) || Down(VK_LCONTROL) || Down(VK_RCONTROL);
+  }
+
+  static void TrackModifiers(uint vk, bool isDown, bool isUp) {
+    if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) {
+      if (isDown) altHeld = true;
+      else if (isUp) altHeld = AnyAltDown();
+    }
+    if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) {
+      if (isDown) ctrlHeld = true;
+      else if (isUp) ctrlHeld = AnyCtrlDown();
+    }
+  }
+
+  static bool AltIsDown(int msg, uint flags) {
+    // Prefer hook-tracked state (same idea as Caps toggle): we saw Alt keydown.
+    if (altHeld) return true;
+    if ((flags & 0x20) != 0) return true; // LLKHF_ALTDOWN
+    if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) return true;
+    return AnyAltDown();
+  }
+
   static bool ModsMatch(bool needCtrl, bool needAlt, bool needShift, bool needWin) {
-    bool ctrl = Down(VK_CONTROL);
-    bool alt = Down(VK_MENU);
+    bool ctrl = ctrlHeld || AnyCtrlDown();
+    bool alt = altHeld || AnyAltDown();
     bool shift = Down(VK_SHIFT);
     bool win = Down(VK_LWIN) || Down(VK_RWIN);
     return ctrl == needCtrl && alt == needAlt && shift == needShift && win == needWin;
@@ -200,7 +229,8 @@ public static class SsHostWatch {
   public static bool NoteCaptureOn() {
     if (string.IsNullOrEmpty(flagPath)) return false;
     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    if (now - lastFlagCheck > 350) {
+    // Keep this short so Alt+C can briefly pause capture for real Ctrl+C inject.
+    if (now - lastFlagCheck > 40) {
       lastFlagCheck = now;
       try {
         captureEnabled = File.Exists(flagPath) && File.ReadAllText(flagPath).Trim() == "1";
@@ -239,6 +269,8 @@ public static class SsHostWatch {
         KBDLLHOOKSTRUCT hs = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
         bool injected = (hs.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0;
         if (!injected) {
+          TrackModifiers(hs.vkCode, isDown, isUp);
+
           if (hs.vkCode == VK_CAPITAL) {
             Emit("HOST_NOTE_CAPS_KEY " + (isDown ? "down" : "up") + " state=" + (CapsOn() ? "on" : "off"));
             EmitCapsIfChanged(isDown ? "keydown" : "keyup");
@@ -249,17 +281,14 @@ public static class SsHostWatch {
           bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;
           if (noteMode && !IsPassThroughVk(hs.vkCode)) {
             if (isDown) {
-              // Alt+letter arrives as WM_SYSKEYDOWN; GetAsyncKeyState(Alt) is often late in LL hooks.
-              bool alt = msg == WM_SYSKEYDOWN
-                || (hs.flags & 0x20) != 0 // LLKHF_ALTDOWN
-                || Down(VK_MENU) || Down(VK_LMENU) || Down(VK_RMENU);
-              if (alt && (hs.vkCode == 0x43 || hs.vkCode == 0x63)) { // Alt+C
+              bool alt = AltIsDown(msg, hs.flags);
+              if (alt && hs.vkCode == 0x43) { // Alt+C
                 Emit("HOST_NOTE_COPY");
-              } else if (alt && (hs.vkCode == 0x56 || hs.vkCode == 0x76)) { // Alt+V
+              } else if (alt && hs.vkCode == 0x56) { // Alt+V
                 Emit("HOST_NOTE_SENDCLIP");
-              } else if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
-              else if (hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
-              else if (hs.vkCode == VK_TAB) Emit("HOST_NOTE_CHAR:\t");
+              } else if (!alt && hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
+              else if (!alt && hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
+              else if (!alt && hs.vkCode == VK_TAB) Emit("HOST_NOTE_CHAR:\t");
               else if (!alt) {
                 string ch = VkToChar(hs.vkCode, hs.scanCode);
                 if (ch == "\r" || ch == "\n") Emit("HOST_NOTE_ENTER");
@@ -282,6 +311,9 @@ public static class SsHostWatch {
               EmitActivity();
             }
           }
+        } else {
+          // Keep modifier tracking honest for injected keyups too
+          TrackModifiers(hs.vkCode, isDown, isUp);
         }
       }
     }

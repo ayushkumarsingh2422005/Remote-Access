@@ -443,7 +443,10 @@ async function copyHostSelection() {
   const now = Date.now();
   if (now - lastNoteCopyAt < 400) return;
   lastNoteCopyAt = now;
+  // Pause note swallow so injected Ctrl+C reaches the focused app.
+  setNoteCapture(false);
   noteRemoteInject();
+  await new Promise((r) => setTimeout(r, 60));
   try {
     await keyboard.pressKey(Key.LeftControl);
     downKeys.add(Key.LeftControl);
@@ -456,8 +459,10 @@ async function copyHostSelection() {
       /* ignore */
     }
     downKeys.delete(Key.LeftControl);
+    noteRemoteInject();
+    await new Promise((r) => setTimeout(r, 40));
+    if (controllerConnected) setNoteCapture(true);
   }
-  noteRemoteInject();
   log('Caps Lock: copied selected text (Alt+C)');
 }
 
