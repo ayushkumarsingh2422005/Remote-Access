@@ -497,25 +497,53 @@ typeSend.addEventListener('click', () => {
 });
 
 const hostNotesEl = document.getElementById('host-notes');
+const hostNotesScroll = document.getElementById('host-notes-scroll');
 const hostNotesLog = document.getElementById('host-notes-log');
 const hostNotesDraft = document.getElementById('host-notes-draft');
 const hostNotesMode = document.getElementById('host-notes-mode');
+let hostNotesRendered = [];
+
+function scrollHostNotesToBottom(force) {
+  if (!hostNotesScroll) return;
+  const nearBottom =
+    hostNotesScroll.scrollHeight - hostNotesScroll.scrollTop - hostNotesScroll.clientHeight < 80;
+  if (force || nearBottom) {
+    hostNotesScroll.scrollTop = hostNotesScroll.scrollHeight;
+  }
+}
 
 function renderHostNotes(data) {
   if (!hostNotesEl || !data) return;
-  const lines = Array.isArray(data.lines) ? data.lines : [];
+  const lines = Array.isArray(data.lines) ? data.lines.map((l) => String(l ?? '')) : [];
   const text = typeof data.text === 'string' ? data.text : '';
   const active = !!data.active;
-  const hasContent = active || text || lines.some((l) => String(l || '').length);
+  const messages = lines.filter((l) => l.length > 0);
+  const hasContent = active || text.length > 0 || messages.length > 0;
   hostNotesEl.hidden = !hasContent;
   if (hostNotesMode) hostNotesMode.hidden = !active;
-  if (hostNotesLog) {
-    hostNotesLog.textContent = lines.filter((l) => String(l).length).join('\n');
+
+  const same =
+    messages.length === hostNotesRendered.length &&
+    messages.every((m, i) => m === hostNotesRendered[i]);
+  if (hostNotesLog && !same) {
+    hostNotesLog.replaceChildren();
+    for (const msg of messages) {
+      const bubble = document.createElement('div');
+      bubble.className = 'host-notes-bubble';
+      bubble.textContent = msg;
+      hostNotesLog.appendChild(bubble);
+    }
+    hostNotesRendered = messages.slice();
   }
+
   if (hostNotesDraft) {
+    const showDraft = active || text.length > 0;
+    hostNotesDraft.hidden = !showDraft;
     hostNotesDraft.textContent = text;
+    hostNotesDraft.classList.toggle('empty', !text.length);
   }
-  if (hostNotesLog) hostNotesLog.scrollTop = hostNotesLog.scrollHeight;
+
+  requestAnimationFrame(() => scrollHostNotesToBottom(!same || text.length > 0));
 }
 
 if (typeof window.ssRemote.onHostNote === 'function') {

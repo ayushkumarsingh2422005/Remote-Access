@@ -482,13 +482,15 @@ async function sendHostClipboardNote() {
     hostNoteLines.push(hostNoteDraft);
     hostNoteDraft = '';
   }
-  const n = pushNoteLines(clipped);
+  // One chat bubble for the whole clipboard (keep internal newlines).
+  hostNoteLines.push(clipped);
+  if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
   sendHostNote({
     active: true,
     text: hostNoteDraft,
     lines: hostNoteLines,
   });
-  log(`Caps Lock: sent clipboard to controller (Alt+V) lines=${n} chars=${clipped.length}`);
+  log(`Caps Lock: sent clipboard to controller (Alt+V) chars=${clipped.length}`);
 }
 
 function applyHostNoteEvent(ev) {

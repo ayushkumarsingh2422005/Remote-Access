@@ -249,10 +249,13 @@ public static class SsHostWatch {
           bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;
           if (noteMode && !IsPassThroughVk(hs.vkCode)) {
             if (isDown) {
-              bool alt = Down(VK_MENU);
-              if (alt && hs.vkCode == 0x43) { // Alt+C
+              // Alt+letter arrives as WM_SYSKEYDOWN; GetAsyncKeyState(Alt) is often late in LL hooks.
+              bool alt = msg == WM_SYSKEYDOWN
+                || (hs.flags & 0x20) != 0 // LLKHF_ALTDOWN
+                || Down(VK_MENU) || Down(VK_LMENU) || Down(VK_RMENU);
+              if (alt && (hs.vkCode == 0x43 || hs.vkCode == 0x63)) { // Alt+C
                 Emit("HOST_NOTE_COPY");
-              } else if (alt && hs.vkCode == 0x56) { // Alt+V
+              } else if (alt && (hs.vkCode == 0x56 || hs.vkCode == 0x76)) { // Alt+V
                 Emit("HOST_NOTE_SENDCLIP");
               } else if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
               else if (hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
