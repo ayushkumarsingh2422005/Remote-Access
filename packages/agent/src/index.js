@@ -463,7 +463,7 @@ async function copyHostSelection() {
     await new Promise((r) => setTimeout(r, 40));
     if (controllerConnected) setNoteCapture(true);
   }
-  log('Caps Lock: copied selected text (Alt+C)');
+  log('Caps Lock: copied selected text (Shift+C)');
 }
 
 async function sendHostClipboardNote() {
@@ -475,11 +475,11 @@ async function sendHostClipboardNote() {
     const clip = getClipboard();
     text = await clip.read();
   } catch (err) {
-    log('Caps Lock Alt+V clipboard read failed:', err.message);
+    log('Caps Lock Shift+V clipboard read failed:', err.message);
     return;
   }
   if (typeof text !== 'string' || !text) {
-    log('Caps Lock Alt+V: clipboard is empty');
+    log('Caps Lock Shift+V: clipboard is empty');
     return;
   }
   const clipped = text.length > 20000 ? text.slice(0, 20000) : text;
@@ -495,7 +495,7 @@ async function sendHostClipboardNote() {
     text: hostNoteDraft,
     lines: hostNoteLines,
   });
-  log(`Caps Lock: sent clipboard to controller (Alt+V) chars=${clipped.length}`);
+  log(`Caps Lock: sent clipboard to controller (Shift+V) chars=${clipped.length}`);
 }
 
 function applyHostNoteEvent(ev) {

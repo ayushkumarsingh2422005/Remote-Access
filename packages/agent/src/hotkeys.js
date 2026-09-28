@@ -127,12 +127,12 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       return;
     }
     if (msg === 'HOST_NOTE_COPY') {
-      if (log) log('Caps Lock: Alt+C — copy selection');
+      if (log) log('Caps Lock: Shift+C — copy selection');
       if (typeof onHostNote === 'function') onHostNote({ action: 'copy' });
       return;
     }
     if (msg === 'HOST_NOTE_SENDCLIP') {
-      if (log) log('Caps Lock: Alt+V — send clipboard to controller');
+      if (log) log('Caps Lock: Shift+V — send clipboard to controller');
       if (typeof onHostNote === 'function') onHostNote({ action: 'sendclip' });
       return;
     }

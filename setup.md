@@ -97,12 +97,12 @@ When a controller is connected, **Caps Lock on** the host turns typing into a si
 |----------|--------|
 | Caps Lock on | Silent note mode (controller must be connected) |
 | Caps Lock off | Normal host typing again |
-| Shift + letter | Real capital on the host (not a note) |
+| Shift + letter (except C/V) | Capital letter in the note |
 | Backspace / Enter | Edit / send a line in the note |
-| `Alt+C` | Copy the selected text on the host (same as Ctrl+C, silent) |
-| `Alt+V` | Send the whole clipboard to the controller Incoming panel in one shot |
+| `Shift+C` | Copy the selected text on the host (same as Ctrl+C, silent) |
+| `Shift+V` | Send the whole clipboard to the controller Incoming panel in one shot |
 
-`ss logs` prints `Caps Lock ENABLED` / `DISABLED`, plus Alt+C / Alt+V when those shortcuts fire. Restart the host after updating (`ss stop all` then `ss start all`).
+`ss logs` prints `Caps Lock ENABLED` / `DISABLED`, plus Shift+C / Shift+V when those shortcuts fire. Restart the host after updating (`ss stop all` then `ss start all`).
 
 ### Host priority (auto)
 

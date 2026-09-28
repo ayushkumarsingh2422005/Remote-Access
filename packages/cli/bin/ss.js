@@ -274,8 +274,8 @@ Host shortcuts (while agent is running):
   Ctrl+Alt+L   Disable remote mouse & keyboard (screen keeps sharing)
   Ctrl+Alt+U   Resume remote mouse & keyboard
   Caps Lock    Silent notes to the controller Incoming panel (Windows)
-  Alt+C        In Caps Lock mode: copy selected host text
-  Alt+V        In Caps Lock mode: send clipboard to the controller
+  Shift+C      In Caps Lock mode: copy selected host text
+  Shift+V      In Caps Lock mode: send clipboard to the controller
 
 Config file: ${CONFIG_PATH}
 `.trim());

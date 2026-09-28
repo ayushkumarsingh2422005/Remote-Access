@@ -200,7 +200,7 @@ public static class SsHostWatch {
   public static bool NoteCaptureOn() {
     if (string.IsNullOrEmpty(flagPath)) return false;
     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    // Short cache so Alt+C can briefly pause capture for real Ctrl+C inject.
+    // Short cache so Shift+C can briefly pause capture for real Ctrl+C inject.
     if (now - lastFlagCheck > 40) {
       lastFlagCheck = now;
       try {
@@ -250,15 +250,20 @@ public static class SsHostWatch {
           bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;
           if (noteMode && !IsPassThroughVk(hs.vkCode)) {
             if (isDown) {
-              bool alt = Down(VK_MENU);
-              if (alt && hs.vkCode == 0x43) { // Alt+C
+              bool shift = Down(VK_SHIFT) || Down(VK_LSHIFT) || Down(VK_RSHIFT);
+              bool alt = Down(VK_MENU) || Down(VK_LMENU) || Down(VK_RMENU);
+              bool ctrl = Down(VK_CONTROL) || Down(VK_LCONTROL) || Down(VK_RCONTROL);
+              // Caps Lock mode: Shift+C copy selection, Shift+V send clipboard.
+              if (shift && !alt && !ctrl && hs.vkCode == 0x43) {
                 Emit("HOST_NOTE_COPY");
-              } else if (alt && hs.vkCode == 0x56) { // Alt+V
+              } else if (shift && !alt && !ctrl && hs.vkCode == 0x56) {
                 Emit("HOST_NOTE_SENDCLIP");
+              } else if (alt || ctrl) {
+                // Swallow Alt/Ctrl chords — do not leak menu/control chars into notes.
               } else if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
               else if (hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
               else if (hs.vkCode == VK_TAB) Emit("HOST_NOTE_CHAR:\t");
-              else if (!alt) {
+              else {
                 string ch = VkToChar(hs.vkCode, hs.scanCode);
                 if (ch == "\r" || ch == "\n") Emit("HOST_NOTE_ENTER");
                 else if (!string.IsNullOrEmpty(ch) && ch[0] >= 32) {
