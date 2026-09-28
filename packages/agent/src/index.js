@@ -425,8 +425,82 @@ function sendHostNote(payload) {
   );
 }
 
+function pushNoteLines(text) {
+  const raw = String(text || '');
+  if (!raw) return 0;
+  const parts = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  for (const part of parts) {
+    hostNoteLines.push(part);
+  }
+  if (hostNoteLines.length > 80) hostNoteLines = hostNoteLines.slice(-80);
+  return parts.length;
+}
+
+let lastNoteCopyAt = 0;
+let lastNoteSendAt = 0;
+
+async function copyHostSelection() {
+  const now = Date.now();
+  if (now - lastNoteCopyAt < 400) return;
+  lastNoteCopyAt = now;
+  noteRemoteInject();
+  try {
+    await keyboard.pressKey(Key.LeftControl);
+    downKeys.add(Key.LeftControl);
+    await keyboard.pressKey(Key.C);
+    await keyboard.releaseKey(Key.C);
+  } finally {
+    try {
+      await keyboard.releaseKey(Key.LeftControl);
+    } catch {
+      /* ignore */
+    }
+    downKeys.delete(Key.LeftControl);
+  }
+  noteRemoteInject();
+  log('Caps Lock: copied selected text (Alt+C)');
+}
+
+async function sendHostClipboardNote() {
+  const now = Date.now();
+  if (now - lastNoteSendAt < 400) return;
+  lastNoteSendAt = now;
+  let text = '';
+  try {
+    const clip = getClipboard();
+    text = await clip.read();
+  } catch (err) {
+    log('Caps Lock Alt+V clipboard read failed:', err.message);
+    return;
+  }
+  if (typeof text !== 'string' || !text) {
+    log('Caps Lock Alt+V: clipboard is empty');
+    return;
+  }
+  const clipped = text.length > 20000 ? text.slice(0, 20000) : text;
+  if (hostNoteDraft) {
+    hostNoteLines.push(hostNoteDraft);
+    hostNoteDraft = '';
+  }
+  const n = pushNoteLines(clipped);
+  sendHostNote({
+    active: true,
+    text: hostNoteDraft,
+    lines: hostNoteLines,
+  });
+  log(`Caps Lock: sent clipboard to controller (Alt+V) lines=${n} chars=${clipped.length}`);
+}
+
 function applyHostNoteEvent(ev) {
   if (!ev || !ev.action) return;
+  if (ev.action === 'copy') {
+    copyHostSelection().catch((err) => log('host note copy error:', err.message));
+    return;
+  }
+  if (ev.action === 'sendclip') {
+    sendHostClipboardNote().catch((err) => log('host note sendclip error:', err.message));
+    return;
+  }
   if (ev.action === 'mode') {
     if (ev.on) {
       log('Caps Lock ENABLED — host typing is silent and sent to the controller');

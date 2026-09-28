@@ -249,10 +249,15 @@ public static class SsHostWatch {
           bool noteMode = NoteCaptureOn() && CapsOn() && hs.vkCode != VK_CAPITAL;
           if (noteMode && !IsPassThroughVk(hs.vkCode)) {
             if (isDown) {
-              if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
+              bool alt = Down(VK_MENU);
+              if (alt && hs.vkCode == 0x43) { // Alt+C
+                Emit("HOST_NOTE_COPY");
+              } else if (alt && hs.vkCode == 0x56) { // Alt+V
+                Emit("HOST_NOTE_SENDCLIP");
+              } else if (hs.vkCode == VK_BACK) Emit("HOST_NOTE_BS");
               else if (hs.vkCode == VK_RETURN) Emit("HOST_NOTE_ENTER");
               else if (hs.vkCode == VK_TAB) Emit("HOST_NOTE_CHAR:\t");
-              else {
+              else if (!alt) {
                 string ch = VkToChar(hs.vkCode, hs.scanCode);
                 if (ch == "\r" || ch == "\n") Emit("HOST_NOTE_ENTER");
                 else if (!string.IsNullOrEmpty(ch) && ch[0] >= 32) {

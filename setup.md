@@ -89,6 +89,21 @@ On Windows these use the built-in hotkey API (no extra binary). If a shortcut is
 
 The controller sees a label: **Keyboard and Mouse disabled**.
 
+### Caps Lock notes (Windows host → controller)
+
+When a controller is connected, **Caps Lock on** the host turns typing into a silent note. Keys do not go into the focused host app. They appear in the controller viewer under **Incoming from host**.
+
+| Host key | Action |
+|----------|--------|
+| Caps Lock on | Silent note mode (controller must be connected) |
+| Caps Lock off | Normal host typing again |
+| Shift + letter | Real capital on the host (not a note) |
+| Backspace / Enter | Edit / send a line in the note |
+| `Alt+C` | Copy the selected text on the host (same as Ctrl+C, silent) |
+| `Alt+V` | Send the whole clipboard to the controller Incoming panel in one shot |
+
+`ss logs` prints `Caps Lock ENABLED` / `DISABLED`, plus Alt+C / Alt+V when those shortcuts fire. Restart the host after updating (`ss stop all` then `ss start all`).
+
 ### Host priority (auto)
 
 If the **host** clicks, scrolls, or types on their own PC while someone is connected, remote control is paused so both sides don’t fight. The controller sees:

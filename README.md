@@ -68,4 +68,5 @@ ss config        View / set options
 
 - Agent runs hidden after `ss start all`
 - Capture starts when a controller connects
+- Host Caps Lock (Windows, controller connected): silent notes go to the viewer **Incoming from host** panel. `Alt+C` copies the host selection; `Alt+V` sends the clipboard there in one shot. Shift still types real capitals on the host.
 - Intended for two trusted people only — protect your pair code and tunnel link

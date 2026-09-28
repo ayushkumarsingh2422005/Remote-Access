@@ -126,6 +126,16 @@ function startWindowsHotkeys({ lockSpec, unlockSpec, onLock, onUnlock, onHostAct
       if (typeof onHostActivity === 'function') onHostActivity();
       return;
     }
+    if (msg === 'HOST_NOTE_COPY') {
+      if (log) log('Caps Lock: Alt+C — copy selection');
+      if (typeof onHostNote === 'function') onHostNote({ action: 'copy' });
+      return;
+    }
+    if (msg === 'HOST_NOTE_SENDCLIP') {
+      if (log) log('Caps Lock: Alt+V — send clipboard to controller');
+      if (typeof onHostNote === 'function') onHostNote({ action: 'sendclip' });
+      return;
+    }
     if (msg === 'HOST_NOTE_BS') {
       if (typeof onHostNote === 'function') onHostNote({ action: 'backspace' });
       return;
